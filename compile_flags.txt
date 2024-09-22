@@ -5,3 +5,4 @@
 -MD
 -MP
 -Iinclude
+-Ilibs/ds/include

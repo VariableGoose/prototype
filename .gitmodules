@@ -1,0 +1,3 @@
+[submodule "libs/ds"]
+	path = libs/ds
+	url = git@github.com:linusepk/ds.git
