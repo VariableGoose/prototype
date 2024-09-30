@@ -2,7 +2,7 @@ BIN := bin/prototype
 
 CC := gcc
 CFLAGS := -std=c99 -Wall -Wextra -ggdb -MD -MP
-IFLAGS := -Iinclude -Ilibs/ds/include
+IFLAGS := -Iinclude -Isrc -Ilibs/ds/include
 LFLAGS := -lm libs/ds/ds.o
 
 SRC := $(wildcard src/*.c) $(wildcard src/**/*.c)
@@ -16,7 +16,7 @@ DEP := $(OBJ:%.o=%.d)
 .DEFAULT_GOAL := build
 
 obj/%.o: %.c
-	@mkdir -p obj
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@ $(IFLAGS)
 
 build: libs $(OBJ)
