@@ -2,19 +2,27 @@
 
 #include "ds.h"
 
+#include "ecs.h"
+#include "str.h"
+
+typedef struct Vec2 Vec2;
+struct Vec2 {
+    float x, y;
+};
+
+typedef Vec2 Position;
+typedef Vec2 Velocity;
+
 int main(void) {
-    printf("Hello, world\n");
+    ECS *ecs = ecs_new();
+    ecs_register_component(ecs, Position);
+    ecs_register_component(ecs, Velocity);
 
-    Vec(int) vec = NULL;
+    Entity ent = ecs_entity(ecs);
+    entity_add_component(ent, Position, {0});
+    entity_add_component(ent, Velocity, {0});
 
-    vec_push(vec, 1);
-    vec_push(vec, 42);
-    vec_push(vec, 83);
-    for (size_t i = 0; i < vec_len(vec); i++) {
-        printf("%d\n", vec[i]);
-    }
-
-    vec_free(vec);
+    ecs_free(ecs);
 
     return 0;
 }
