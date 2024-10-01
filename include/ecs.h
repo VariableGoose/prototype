@@ -9,7 +9,7 @@ typedef struct ECS ECS;
 typedef uint64_t EntityId;
 typedef struct Entity Entity;
 struct Entity {
-    const ECS *ecs;
+    ECS *ecs;
     EntityId id;
 };
 

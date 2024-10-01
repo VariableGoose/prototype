@@ -2,6 +2,8 @@
 #include "ecs/internal.h"
 
 #include <stdlib.h>
+#include <assert.h>
+#include <stdio.h>
 
 #include "ds.h"
 #include "str.h"
@@ -24,11 +26,16 @@ ECS *ecs_new(void) {
 
 void ecs_free(ECS *ecs) {
     hash_map_free(ecs->component_map);
+    vec_free(ecs->components);
 
     for (size_t i = 0; i < vec_len(ecs->archetypes); i++) {
         archetype_free(ecs->archetypes[i]);
     }
     vec_free(ecs->archetypes);
+
+    hash_map_free(ecs->entity_map);
+    vec_free(ecs->entity_generation);
+    vec_free(ecs->entity_free_list);
 
     free(ecs);
 }
@@ -52,7 +59,7 @@ Entity ecs_entity(ECS *ecs) {
         vec_push(ecs->entity_generation, 0);
     }
 
-    EntityId id = index & (uint64_t) generation << 32;
+    EntityId id = index | (uint64_t) generation << 32;
     ArchetypeColumn column = archetype_column_new(&ecs->archetypes[0]);
     hash_map_insert(ecs->entity_map, index, column);
 
@@ -62,4 +69,36 @@ Entity ecs_entity(ECS *ecs) {
     };
 }
 
-void _entity_add_component(Entity entity, Str component_name, const void *data) {}
+void _entity_add_component(Entity entity, Str component_name, const void *data) {
+    ECS *ecs = entity.ecs;
+    uint32_t index = entity.id;
+    uint32_t generation = entity.id >> 32;
+    assert(ecs->entity_generation[index] == generation);
+
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity.id);
+    Archetype *current_archetype = column->archetype;
+    ComponentId component_id = hash_map_get(ecs->component_map, component_name);
+
+    ArchetypeEdge edge = hash_map_get(current_archetype->edge_map, component_id);
+    if (edge.add == NULL) {
+        Vec(ComponentId) type_add = NULL;
+        vec_insert_arr(type_add, 0, current_archetype->types, vec_len(current_archetype->types));
+        vec_push(type_add, component_id);
+        vec_push(ecs->archetypes, archetype_new(ecs, type_add));
+        vec_free(type_add);
+        Archetype *new_archetype = &vec_last(ecs->archetypes);
+
+        edge = (ArchetypeEdge) {
+            .add = new_archetype,
+            .remove = current_archetype,
+        };
+        hash_map_insert(current_archetype->edge_map, component_id, edge);
+
+        printf("No edge\n");
+    } else {
+        printf("Edge\n");
+    }
+
+    Archetype *new_archetype = edge.add;
+    *column = archetype_move(current_archetype, new_archetype, column->index);
+}

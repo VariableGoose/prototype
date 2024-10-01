@@ -22,6 +22,10 @@ int main(void) {
     entity_add_component(ent, Position, {0});
     entity_add_component(ent, Velocity, {0});
 
+    ent = ecs_entity(ecs);
+    entity_add_component(ent, Position, {0});
+    entity_add_component(ent, Velocity, {0});
+
     ecs_free(ecs);
 
     return 0;
