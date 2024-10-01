@@ -69,6 +69,10 @@ Entity ecs_entity(ECS *ecs) {
     };
 }
 
+static void link_archetype(ECS *ecs, Archetype *archetype) {
+    // TODO : Add a map from Vec(ComponentId) to Archetype to find all subsets and supersets of component.
+}
+
 void _entity_add_component(Entity entity, Str component_name, const void *data) {
     ECS *ecs = entity.ecs;
     uint32_t index = entity.id;
@@ -93,8 +97,9 @@ void _entity_add_component(Entity entity, Str component_name, const void *data) 
             .remove = current_archetype,
         };
         hash_map_insert(current_archetype->edge_map, component_id, edge);
-
         printf("No edge\n");
+
+        link_archetype(ecs, new_archetype);
     } else {
         printf("Edge\n");
     }
