@@ -19,7 +19,7 @@ struct Archetype {
     Type type;
     // TODO: Store each component in a separate vector since operations are
     // going to operate on individual components and not whole archetypes.
-    Vec(void) storage;
+    Vec(Vec(void)) storage;
     HashMap(ComponentId, ArchetypeEdge) edge_map;
     HashMap(ComponentId, size_t) component_index_map;
 };
@@ -41,7 +41,7 @@ struct ECS {
     ComponentMap component_map;
     Vec(Component) components;
 
-    Vec(Archetype) archetypes;
+    Vec(Archetype *) archetypes;
     HashMap(Type, Archetype *) archetype_map;
 
     HashMap(uint32_t, ArchetypeColumn) entity_map;
@@ -50,8 +50,8 @@ struct ECS {
     uint32_t entity_curr_index;
 };
 
-extern Archetype archetype_new(const ECS *ecs, Type type);
-extern void archetype_free(Archetype archetype);
+extern Archetype *archetype_new(const ECS *ecs, Type type);
+extern void archetype_free(Archetype *archetype);
 extern ArchetypeColumn archetype_column_new(Archetype *archetype);
 extern ArchetypeColumn archetype_move(Archetype *current, Archetype *new, size_t index);
 
@@ -62,4 +62,4 @@ extern size_t type_hash(const void *data, size_t size);
 extern int type_cmp(const void *a, const void *b, size_t size);
 extern void type_free(Type type);
 extern size_t type_len(Type type);
-extern bool type_is_proper_subset(const Type a, const Type b);
+extern bool type_is_proper_subset(const Type a, const Type b, ComponentId *diff_component);

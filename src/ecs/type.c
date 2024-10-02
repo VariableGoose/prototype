@@ -1,5 +1,6 @@
 #include "ds.h"
 #include "internal.h"
+#include <time.h>
 
 void type_add(Type type, ComponentId component) {
     for (size_t i = 0; i < vec_len(type); i++) {
@@ -48,14 +49,9 @@ size_t type_len(Type type) {
     return vec_len(type);
 }
 
-#include <stdio.h>
-bool type_is_proper_subset(const Type a, const Type b) {
+bool type_is_proper_subset(const Type a, const Type b, ComponentId *diff_component) {
     if (type_len(a) >= type_len(b)) {
         return false;
-    }
-
-    if (type_len(a) == 0 && type_len(b) == 1) {
-        return true;
     }
 
     size_t i = 0;
@@ -70,7 +66,10 @@ bool type_is_proper_subset(const Type a, const Type b) {
             j++;
         }
     }
-    printf("i: %zu, j: %zu\n", i, j);
 
-    return i+1==j;
+    if (diff_component != NULL) {
+        *diff_component = b[j];
+    }
+
+    return i == vec_len(a);
 }
