@@ -1,5 +1,5 @@
 #include "ecs.h"
-#include "ecs/internal.h"
+#include "internal.h"
 
 #include <stdlib.h>
 #include <assert.h>
@@ -17,8 +17,14 @@ ECS *ecs_new(void) {
     component_map_desc.hash = str_hash;
     hash_map_new(ecs->component_map, component_map_desc);
 
-    Vec(ComponentId) null_archetype = NULL;
+    HashMapDesc archetype_map_desc = hash_map_desc_default(ecs->archetype_map);
+    component_map_desc.cmp = type_cmp;
+    component_map_desc.hash = type_hash;
+    hash_map_new(ecs->archetype_map, archetype_map_desc);
+
+    Type null_archetype = NULL;
     vec_push(ecs->archetypes, archetype_new(ecs, null_archetype));
+    hash_map_insert(ecs->archetype_map, null_archetype, &ecs->archetypes[0]);
     vec_free(null_archetype);
 
     return ecs;
@@ -32,6 +38,7 @@ void ecs_free(ECS *ecs) {
         archetype_free(ecs->archetypes[i]);
     }
     vec_free(ecs->archetypes);
+    hash_map_free(ecs->archetype_map);
 
     hash_map_free(ecs->entity_map);
     vec_free(ecs->entity_generation);
@@ -69,8 +76,32 @@ Entity ecs_entity(ECS *ecs) {
     };
 }
 
-static void link_archetype(ECS *ecs, Archetype *archetype) {
-    // TODO : Add a map from Vec(ComponentId) to Archetype to find all subsets and supersets of component.
+static void create_edges(Archetype *root, Archetype *archetype) {
+    // If the root has more than one more component than archetype we don't need to check it
+    // because we take single component steps in the graph.
+    if (type_len(root->type) > type_len(archetype->type) + 1) {
+        return;
+    }
+
+    // TODO: Add edges between the archetypes.
+
+    // Create add link
+    if (type_len(root->type) == type_len(archetype->type) - 1 &&
+        type_is_proper_subset(root->type, archetype->type)) {
+        printf("Add from root\n");
+    }
+
+    // Create remove link
+    if (type_len(root->type) == type_len(archetype->type) + 1 &&
+        type_is_proper_subset(archetype->type, root->type)) {
+        printf("Remove from root\n");
+    }
+
+    for (HashMapIter i = hash_map_iter_new(root->edge_map);
+        hash_map_iter_valid(root->edge_map, i);
+        i = hash_map_iter_next(root->edge_map, i)) {
+        create_edges(root->edge_map[i].value.add, archetype);
+    }
 }
 
 void _entity_add_component(Entity entity, Str component_name, const void *data) {
@@ -84,26 +115,21 @@ void _entity_add_component(Entity entity, Str component_name, const void *data) 
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
     ArchetypeEdge edge = hash_map_get(current_archetype->edge_map, component_id);
+    Archetype *new_archetype = NULL;
     if (edge.add == NULL) {
-        Vec(ComponentId) type_add = NULL;
-        vec_insert_arr(type_add, 0, current_archetype->types, vec_len(current_archetype->types));
-        vec_push(type_add, component_id);
-        vec_push(ecs->archetypes, archetype_new(ecs, type_add));
-        vec_free(type_add);
-        Archetype *new_archetype = &vec_last(ecs->archetypes);
+        Type new_type = type_clone(current_archetype->type);
+        type_add(new_type, component_id);
+        vec_push(ecs->archetypes, archetype_new(ecs, new_type));
+        vec_free(new_type);
+        new_archetype = &vec_last(ecs->archetypes);
 
-        edge = (ArchetypeEdge) {
-            .add = new_archetype,
-            .remove = current_archetype,
-        };
-        hash_map_insert(current_archetype->edge_map, component_id, edge);
         printf("No edge\n");
 
-        link_archetype(ecs, new_archetype);
+        create_edges(&ecs->archetypes[0], new_archetype);
     } else {
+        new_archetype = edge.add;
         printf("Edge\n");
     }
 
-    Archetype *new_archetype = edge.add;
     *column = archetype_move(current_archetype, new_archetype, column->index);
 }
