@@ -25,6 +25,7 @@ void archetype_free(Archetype *archetype) {
     vec_free(archetype->storage);
     type_free(archetype->type);
     hash_map_free(archetype->edge_map);
+    hash_map_free(archetype->component_index_map);
     free(archetype);
 }
 

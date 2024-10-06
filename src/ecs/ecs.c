@@ -23,7 +23,7 @@ ECS *ecs_new(void) {
     hash_map_new(ecs->archetype_map, archetype_map_desc);
 
     ecs->root_archetype = archetype_new(ecs, NULL);
-    // hash_map_insert(ecs->archetype_map, NULL, ecs->root_archetype);
+    hash_map_insert(ecs->archetype_map, NULL, ecs->root_archetype);
 
     return ecs;
 }
