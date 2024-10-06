@@ -1,6 +1,7 @@
 #include "ds.h"
 #include "internal.h"
-#include <time.h>
+
+#include <stdio.h>
 
 void type_add(Type type, ComponentId component) {
     for (size_t i = 0; i < vec_len(type); i++) {
@@ -72,4 +73,14 @@ bool type_is_proper_subset(const Type a, const Type b, ComponentId *diff_compone
     }
 
     return i == vec_len(a);
+}
+
+void type_inspect(const Type type) {
+    for (size_t i = 0; i < type_len(type); i++) {
+        printf("%zu", type[i]);
+        if (i < type_len(type) - 1) {
+            printf(", ");
+        }
+    }
+    printf("\n");
 }

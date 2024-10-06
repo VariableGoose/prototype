@@ -16,7 +16,7 @@ struct Entity {
 extern ECS *ecs_new(void);
 extern void ecs_free(ECS *ecs);
 
-#define ecs_register_component(ecs, component)                                 \
+#define ecs_register_component(ecs, component) \
   _ecs_register_component(ecs, str_lit(#component), sizeof(component))
 extern void _ecs_register_component(ECS *ecs, Str component_name,
                                     size_t component_size);
@@ -27,7 +27,10 @@ extern void _ecs_register_component(ECS *ecs, Str component_name,
 
 extern Entity ecs_entity(ECS *ecs);
 
-#define entity_add_component(entity, component, ...)                           \
+#define entity_add_component(entity, component, ...) \
   _entity_add_component(entity, str_lit(#component), &(component)__VA_ARGS__)
-extern void _entity_add_component(Entity entity, Str component_name,
-                                  const void *data);
+extern void _entity_add_component(Entity entity, Str component_name, const void *data);
+
+#define entity_get_component(entity, component) \
+  _entity_get_component(entity, str_lit(#component))
+extern void *_entity_get_component(Entity entity, Str component_name);
