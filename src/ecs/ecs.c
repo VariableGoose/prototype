@@ -126,6 +126,12 @@ void _entity_add_component(Entity entity, Str component_name, const void *data) 
     Archetype *current_archetype = column->archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
+    // Check if archetype already has component.
+    size_t *component_index = hash_map_getp(current_archetype->component_index_map, component_id);
+    if (component_index != NULL) {
+        return;
+    }
+
     ArchetypeEdge edge = hash_map_get(current_archetype->edge_map, component_id);
     Archetype *new_archetype = edge.add;
     if (edge.add == NULL) {
@@ -153,6 +159,47 @@ void _entity_add_component(Entity entity, Str component_name, const void *data) 
     size_t storage_index = hash_map_get(new_archetype->component_index_map, component_id);
     void *storage = new_archetype->storage[storage_index] + ecs->components[component_id].size*column->index;
     memcpy(storage, data, ecs->components[component_id].size);
+}
+
+void _entity_remove_component(Entity entity, Str component_name) {
+    ECS *ecs = entity.ecs;
+    uint32_t index = entity.id;
+    uint32_t generation = entity.id >> 32;
+    assert(ecs->entity_generation[index] == generation);
+
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity.id);
+    Archetype *current_archetype = column->archetype;
+    ComponentId component_id = hash_map_get(ecs->component_map, component_name);
+
+    // Check if archetype doesn't have component.
+    size_t *component_index = hash_map_getp(current_archetype->component_index_map, component_id);
+    if (component_index == NULL) {
+        return;
+    }
+
+    ArchetypeEdge edge = hash_map_get(current_archetype->edge_map, component_id);
+    Archetype *new_archetype = edge.remove;
+    if (edge.remove == NULL) {
+        Type new_type = type_clone(current_archetype->type);
+        type_remove(new_type, component_id);
+        new_archetype = hash_map_get(ecs->archetype_map, new_type);
+        if (new_archetype == NULL) {
+            new_archetype = archetype_new(ecs, new_type);
+            hash_map_insert(ecs->archetype_map, new_archetype->type, new_archetype);
+        }
+        vec_free(new_type);
+
+        ArchetypeEdge edge = {
+            .add = current_archetype,
+            .remove = new_archetype,
+        };
+        hash_map_insert(current_archetype->edge_map, component_id, edge);
+        hash_map_insert(new_archetype->edge_map, component_id, edge);
+
+        // create_edges(ecs->archetypes[0], new_archetype);
+    }
+
+    *column = archetype_move(ecs, current_archetype, new_archetype, column->index);
 }
 
 void *_entity_get_component(Entity entity, Str component_name) {

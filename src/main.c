@@ -22,6 +22,8 @@ int main(void) {
     entity_add_component(ent, Velocity, {0});
     entity_add_component(ent, Size, {42.0f, 3.1415926f});
 
+    entity_remove_component(ent, Size);
+
     Position *pos = entity_get_component(ent, Position);
     printf("%f, %f\n", pos->x, pos->y);
     Size *size = entity_get_component(ent, Size);

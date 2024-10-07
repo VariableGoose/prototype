@@ -52,9 +52,14 @@ ArchetypeColumn archetype_move(const ECS *ecs, Archetype *current, Archetype *ne
         if (idx == NULL) {
             continue;
         }
-        void *old_storage_location = current->storage[i] + ecs->components[component].size*index;
-        void *new_storage_location = new->storage[*idx] + ecs->components[component].size*column.index;
+        void *old_storage_location = current->storage[i] + ecs->components[component].size * index;
+        void *new_storage_location = new->storage[*idx] + ecs->components[component].size * column.index;
         memcpy(new_storage_location, old_storage_location, ecs->components[component].size);
+    }
+
+    // Remove old data from old archetype.
+    for (size_t i = 0; i < type_len(new->type); i++) {
+        _vec_remove_fast(&new->storage[i], i, NULL);
     }
 
     return column;
