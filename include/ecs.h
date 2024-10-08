@@ -30,9 +30,9 @@ extern Entity ecs_entity(ECS *ecs);
 extern void _entity_add_component(Entity entity, Str component_name,
         const void *data);
 
-// #define entity_remove_component(entity, component) \
-//     _entity_remove_component(entity, str_lit(#component))
-// extern void _entity_remove_component(Entity entity, Str component_name);
+#define entity_remove_component(entity, component) \
+    _entity_remove_component(entity, str_lit(#component))
+extern void _entity_remove_component(Entity entity, Str component_name);
 
 #define entity_get_component(entity, component) \
     _entity_get_component(entity, str_lit(#component))

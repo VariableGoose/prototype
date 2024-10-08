@@ -141,3 +141,61 @@ void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *componen
         _vec_remove_fast(&left->storage[i], left_column, NULL);
     }
 }
+
+void archetype_move_entity_left(ECS *ecs, Archetype *right, ComponentId component_id, size_t right_column) {
+    ArchetypeEdge edge = hash_map_get(right->edge_map, component_id);
+    Archetype *left = edge.remove;
+    if (edge.add == NULL) {
+        Type left_type = type_clone(right->type);
+        type_remove(left_type, component_id);
+        left = hash_map_get(ecs->archetype_map, left_type);
+        if (left == NULL) {
+            left = archetype_new(ecs, left_type);
+            hash_map_insert(ecs->archetype_map, left->type, left);
+        }
+        type_free(left_type);
+
+        ArchetypeEdge edge = {
+            .add = right,
+            .remove = left,
+        };
+        hash_map_insert(left->edge_map, component_id, edge);
+        hash_map_insert(right->edge_map, component_id, edge);
+
+        // create_edges(ecs->archetypes[0], new_archetype);
+    }
+
+    // Swap place of the last entity and the one being moved.
+    EntityId last_right_entity = hash_map_get(right->entity_lookup, right->current_index-1);
+    EntityId entity_to_move = hash_map_get(right->entity_lookup, right_column);
+    ArchetypeColumn column = {
+        .archetype = right,
+        .index = right_column,
+    };
+    hash_map_set(ecs->entity_map, last_right_entity, column);
+    hash_map_set(right->entity_lookup, right_column, last_right_entity);
+    right->current_index--;
+
+    // Place the entity in the right archetype.
+    size_t left_column = left->current_index++;
+    hash_map_insert(left->entity_lookup, left_column, entity_to_move);
+    column = (ArchetypeColumn) {
+        .archetype = left,
+        .index = left_column,
+    };
+    hash_map_set(ecs->entity_map, entity_to_move, column);
+
+    // Add the entity to the storage of the right archetype.
+    for (size_t i = 0; i < type_len(left->type); i++) {
+        ComponentId comp = left->type[i];
+        size_t index = hash_map_get(right->component_lookup, comp);
+        size_t component_size = ecs->components[comp].size;
+        _vec_insert_fast(&right->storage[index], vec_len(right->storage[index]), left->storage[i] + component_size*left_column);
+    }
+
+    // Remove the moved entity column and place the last entity column into the
+    // now empty column.
+    for (size_t i = 0; i < type_len(right->type); i++) {
+        _vec_remove_fast(&right->storage[i], right_column, NULL);
+    }
+}

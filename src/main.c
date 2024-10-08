@@ -25,13 +25,17 @@ int main(void) {
     entity_add_component(ent, Position, {1, 2});
     entity_add_component(ent, Size, {42.0f, 3.1415926f});
 
+    entity_remove_component(ent, Velocity);
+
     Position *pos = entity_get_component(ent, Position);
     printf("%f, %f\n", pos->x, pos->y);
     Size *size = entity_get_component(ent, Size);
     printf("%f, %f\n", size->x, size->y);
+    Velocity *vel = entity_get_component(ent, Velocity);
+    printf("%p\n", vel);
 
-    Velocity *vel = entity_get_component(ent2, Velocity);
-    printf("%f, %f\n", vel->x, vel->y);
+    Velocity *vel2 = entity_get_component(ent2, Velocity);
+    printf("%f, %f\n", vel2->x, vel2->y);
 
     ecs_free(ecs);
 
