@@ -1,11 +1,14 @@
 #include "ds.h"
 #include "internal.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 void type_add(Type type, ComponentId component) {
     for (size_t i = 0; i < vec_len(type); i++) {
-        if (type[i] > component) {
+        if (type[i] == component) {
+            return;
+        } else if (type[i] > component) {
             vec_insert(type, i, component);
             return;
         }
