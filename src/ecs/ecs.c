@@ -40,7 +40,7 @@ void ecs_free(ECS *ecs) {
     hash_map_free(ecs->archetype_map);
 
     hash_map_free(ecs->entity_map);
-    vec_free(ecs->entity_generation);
+    hash_map_free(ecs->entity_generation);
     vec_free(ecs->entity_free_list);
 
     free(ecs);
@@ -59,55 +59,49 @@ Entity ecs_entity(ECS *ecs) {
     uint32_t generation = 0;
     if (vec_len(ecs->entity_free_list) > 0) {
         index = vec_pop(ecs->entity_free_list);
-        generation = ecs->entity_generation[index];
+        generation = hash_map_get(ecs->entity_generation, index);
     } else {
-        index = ecs->entity_curr_index++;
-        vec_push(ecs->entity_generation, 0);
+        index = ecs->entity_current_id++;
+        hash_map_set(ecs->entity_generation, index, generation);
     }
 
-    EntityId id = index | (uint64_t) generation << 32;
+    Entity id = index | (uint64_t) generation << 32;
     ArchetypeColumn column = archetype_add_entity(ecs->root_archetype, id);
     hash_map_insert(ecs->entity_map, id, column);
 
-    return (Entity) {
-        .ecs = ecs,
-        .id = id,
-    };
+    return id;
 }
 
-void _entity_add_component(Entity entity, Str component_name, const void *data) {
-    ECS *ecs = entity.ecs;
-    uint32_t index = entity.id;
-    uint32_t generation = entity.id >> 32;
-    assert(ecs->entity_generation[index] == generation);
+void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const void *data) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    assert(hash_map_get(ecs->entity_generation, index) == generation);
 
-    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity.id);
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     Archetype *left_archetype = column->archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
     archetype_move_entity_right(ecs, left_archetype, data, component_id, column->index);
 }
 
-void _entity_remove_component(Entity entity, Str component_name) {
-    ECS *ecs = entity.ecs;
-    uint32_t index = entity.id;
-    uint32_t generation = entity.id >> 32;
-    assert(ecs->entity_generation[index] == generation);
+void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    assert(hash_map_get(ecs->entity_generation, index) == generation);
 
-    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity.id);
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     Archetype *right_archetype = column->archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
     archetype_move_entity_left(ecs, right_archetype, component_id, column->index);
 }
 
-void *_entity_get_component(Entity entity, Str component_name) {
-    ECS *ecs = entity.ecs;
-    uint32_t index = entity.id;
-    uint32_t generation = entity.id >> 32;
-    assert(ecs->entity_generation[index] == generation);
+void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    assert(hash_map_get(ecs->entity_generation, index) == generation);
 
-    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity.id);
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
     size_t *row = hash_map_getp(column->archetype->component_lookup, component_id);
     // Archetype doesn't have component.

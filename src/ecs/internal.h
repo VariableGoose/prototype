@@ -42,7 +42,7 @@ struct Archetype {
     // Component to row lookup table.
     HashMap(ComponentId, size_t) component_lookup;
     // Column to entity lookup table.
-    HashMap(size_t, EntityId) entity_lookup;
+    HashMap(size_t, Entity) entity_lookup;
 };
 
 typedef struct ArchetypeColumn ArchetypeColumn;
@@ -55,7 +55,7 @@ extern Archetype *archetype_new(const ECS *ecs, Type type);
 extern void archetype_free(Archetype *archetype);
 // This should only be called on the root archetype that doesn't have any
 // component storage.
-extern ArchetypeColumn archetype_add_entity(Archetype *archetype, EntityId entity);
+extern ArchetypeColumn archetype_add_entity(Archetype *archetype, Entity entity);
 extern void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *component_data, ComponentId component_id, size_t left_column);
 extern void archetype_move_entity_left(ECS *ecs, Archetype *right, ComponentId component_id, size_t right_column);
 
@@ -75,8 +75,8 @@ struct ECS {
     Archetype * root_archetype;
     HashMap(Type, Archetype *) archetype_map;
 
-    HashMap(uint32_t, ArchetypeColumn) entity_map;
-    Vec(uint32_t) entity_generation;
+    HashMap(Entity, ArchetypeColumn) entity_map;
+    HashMap(uint32_t, uint32_t) entity_generation;
     Vec(uint32_t) entity_free_list;
-    uint32_t entity_curr_index;
+    uint32_t entity_current_id;
 };
