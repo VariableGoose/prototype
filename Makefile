@@ -1,6 +1,6 @@
 BIN := bin/prototype
 
-CC := gcc
+CC := clang
 CFLAGS := -std=c99 -Wall -Wextra -ggdb -MD -MP
 IFLAGS := -Iinclude -Isrc -Ilibs/ds/include
 LFLAGS := -lm libs/ds/ds.o

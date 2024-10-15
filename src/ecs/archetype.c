@@ -4,6 +4,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef struct Vec2 Vec2;
+struct Vec2 {
+    float x, y;
+};
+
+static void archetype_inspect(const Archetype *archetype) {
+    printf("Archetype (%p)\n", archetype);
+    printf("    Type: ");
+    type_inspect(archetype->type);
+    printf("    Entity count: %zu\n", archetype->current_index);
+
+    printf("    Storage:\n");
+    for (size_t i = 0; i < vec_len(archetype->type); i++) {
+        printf("    [%zu] = {\n", i);
+        Vec2 *arr = archetype->storage[i];
+        for (size_t j = 0; j < archetype->current_index; j++) {
+            printf("        (%f, %f),\n", arr[j].x, arr[j].y);
+        }
+        printf("    }\n");
+    }
+}
+
 Archetype *archetype_new(const ECS *ecs, Type type) {
     Archetype *archetype = malloc(sizeof(Archetype));
     *archetype = (Archetype) {
@@ -13,6 +35,14 @@ Archetype *archetype_new(const ECS *ecs, Type type) {
     for (size_t i = 0; i < type_len(type); i++) {
         vec_push(archetype->storage, vec_new(ecs->components[type[i]].size));
         hash_map_insert(archetype->component_lookup, type[i], i);
+
+        HashSet(Archetype *) archetype_set = hash_map_get(ecs->component_archetype_set_map, type[i]);
+        if (archetype_set == NULL) {
+            hash_set_insert(archetype_set, archetype);
+            hash_map_insert(ecs->component_archetype_set_map, type[i], archetype_set);
+        } else {
+            hash_set_insert(archetype_set, archetype);
+        }
     }
 
     return archetype;
@@ -90,6 +120,7 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
     };
     hash_map_set(ecs->entity_map, last_current_entity, column);
     hash_map_set(current->entity_lookup, current_column, last_current_entity);
+    hash_map_remove(current->entity_lookup, current->current_index-1);
     current->current_index--;
 
     // Place the entity in the next archetype.
@@ -101,14 +132,21 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
     };
     hash_map_set(ecs->entity_map, entity_to_move, column);
 
-    // Add the entity to the storage of the right archetype.
-    Archetype *smaller_archetype = type_len(current->type) > type_len(next->type) ? next : current;
-    Archetype *bigger_archetype = type_len(current->type) > type_len(next->type) ? current : next;
-    for (size_t i = 0; i < type_len(smaller_archetype->type); i++) {
-        ComponentId comp = smaller_archetype->type[i];
-        size_t index = hash_map_get(bigger_archetype->component_lookup, comp);
-        size_t component_size = ecs->components[comp].size;
-        _vec_insert_fast(&bigger_archetype->storage[index], vec_len(bigger_archetype->storage[index]), smaller_archetype->storage[i] + component_size*next_column);
+    // Move the entity storage to the next archetype.
+    if (type_len(current->type) < type_len(next->type)) {
+        for (size_t i = 0; i < type_len(current->type); i++) {
+            ComponentId comp = current->type[i];
+            size_t index = hash_map_get(next->component_lookup, comp);
+            size_t component_size = ecs->components[comp].size;
+            _vec_insert_fast(&next->storage[index], vec_len(next->storage[index]), current->storage[i] + component_size*current_column);
+        }
+    } else {
+        for (size_t i = 0; i < type_len(next->type); i++) {
+            ComponentId comp = next->type[i];
+            size_t index = hash_map_get(current->component_lookup, comp);
+            size_t component_size = ecs->components[comp].size;
+            _vec_insert_fast(&next->storage[i], vec_len(next->storage[i]), current->storage[index] + component_size*next_column);
+        }
     }
 
     // Remove the moved entity column and place the last entity column into the
@@ -139,6 +177,7 @@ void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *componen
         hash_map_insert(right->edge_map, component_id, edge);
 
         // create_edges(ecs->archetypes[0], new_archetype);
+    } else {
     }
 
     archetype_move_entity(ecs, left, right, left_column);
@@ -146,6 +185,11 @@ void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *componen
     // Populate the empty row with data of the component being added.
     size_t index = hash_map_get(right->component_lookup, component_id);
     _vec_insert_fast(&right->storage[index], vec_len(right->storage[index]), component_data);
+
+    // printf("-- MOVE ------------------------------------------------------------------------\n");
+    // archetype_inspect(left);
+    // archetype_inspect(right);
+    // printf("\n");
 }
 
 void archetype_move_entity_left(ECS *ecs, Archetype *right, ComponentId component_id, size_t right_column) {

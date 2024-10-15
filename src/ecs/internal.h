@@ -66,10 +66,8 @@ struct Component {
     size_t size;
 };
 
-typedef HashMap(Str, ComponentId) ComponentMap;
-
 struct ECS {
-    ComponentMap component_map;
+    HashMap(Str, ComponentId) component_map;
     Vec(Component) components;
 
     Archetype * root_archetype;
@@ -79,4 +77,6 @@ struct ECS {
     HashMap(uint32_t, uint32_t) entity_generation;
     Vec(uint32_t) entity_free_list;
     uint32_t entity_current_id;
+
+    HashMap(ComponentId, HashSet(Archetype *)) component_archetype_set_map;
 };

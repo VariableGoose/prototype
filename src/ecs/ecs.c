@@ -33,8 +33,8 @@ void ecs_free(ECS *ecs) {
     vec_free(ecs->components);
 
     for (size_t i = hash_map_iter_new(ecs->archetype_map);
-        hash_map_iter_valid(ecs->archetype_map, i);
-        i = hash_map_iter_next(ecs->archetype_map, i)) {
+            hash_map_iter_valid(ecs->archetype_map, i);
+            i = hash_map_iter_next(ecs->archetype_map, i)) {
         archetype_free(ecs->archetype_map[i].value);
     }
     hash_map_free(ecs->archetype_map);
@@ -42,6 +42,13 @@ void ecs_free(ECS *ecs) {
     hash_map_free(ecs->entity_map);
     hash_map_free(ecs->entity_generation);
     vec_free(ecs->entity_free_list);
+
+    for (size_t i = hash_map_iter_new(ecs->component_archetype_set_map);
+            hash_map_iter_valid(ecs->component_archetype_set_map, i);
+            i = hash_map_iter_next(ecs->component_archetype_set_map, i)) {
+        hash_set_free(ecs->component_archetype_set_map[i].value);
+    }
+    hash_map_free(ecs->component_archetype_set_map);
 
     free(ecs);
 }
@@ -52,6 +59,10 @@ void _ecs_register_component(ECS *ecs, Str component_name, size_t component_size
         .size = component_size,
     };
     vec_push(ecs->components, comp);
+}
+
+Entity _ecs_id(ECS *ecs, Str component_name) {
+    return hash_map_get(ecs->component_map, component_name);
 }
 
 Entity ecs_entity(ECS *ecs) {

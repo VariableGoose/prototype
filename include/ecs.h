@@ -16,6 +16,9 @@ extern void ecs_free(ECS *ecs);
 extern void _ecs_register_component(ECS *ecs, Str component_name,
                                     size_t component_size);
 
+#define ecs_id(ecs, component) _ecs_id(ecs, str_lit(#component))
+extern Entity _ecs_id(ECS *ecs, Str component_name);
+
 // -- Entity -------------------------------------------------------------------
 extern Entity ecs_entity(ECS *ecs);
 
@@ -31,3 +34,37 @@ extern void _entity_remove_component(ECS *ecs, Entity entity, Str component_name
 #define entity_get_component(ecs, entity, component) \
     _entity_get_component(ecs, entity, str_lit(#component))
 extern void *_entity_get_component(ECS *ecs, Entity entity, Str component_name);
+
+// extern void entity_add_entity(ECS *ecs, Entity self, Entity other);
+// extern void entity_remove_entity(ECS *ecs, Entity self, Entity other);
+
+// -- Query --------------------------------------------------------------------
+#define MAX_QUERY_FIELDS 128
+static const Entity QUERY_FIELDS_END = -1;
+
+typedef struct QueryDesc QueryDesc;
+struct QueryDesc {
+    Entity fields[MAX_QUERY_FIELDS];
+};
+
+typedef struct Query Query;
+struct Query {
+    size_t count;
+
+    QueryDesc _desc;
+    size_t _field_count;
+    void **_archetypes;
+};
+
+typedef struct QueryIter QueryIter;
+struct QueryIter {
+    size_t count;
+
+    Query _query;
+    size_t _i;
+};
+
+extern Query ecs_query(ECS *ecs, QueryDesc desc);
+extern QueryIter ecs_query_get_iter(Query query, size_t i);
+extern void *ecs_query_iter_get_field(ECS *ecs, QueryIter iter, size_t field);
+extern void ecs_query_free(Query query);
