@@ -68,7 +68,7 @@ QueryIter ecs_query_get_iter(Query query, size_t i) {
     };
 }
 
-void *ecs_query_iter_get_field(ECS *ecs, QueryIter iter, size_t field) {
+void *ecs_query_iter_get_field(QueryIter iter, size_t field) {
     assert(field < iter._query._field_count);
 
     Archetype *archetype = ((Vec(Archetype *)) iter._query._archetypes)[iter._i];

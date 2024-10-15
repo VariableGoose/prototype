@@ -12,8 +12,10 @@ typedef Vec2 Velocity;
 typedef Vec2 Size;
 
 void move_system(ECS *ecs, QueryIter iter) {
-    Position *pos = ecs_query_iter_get_field(ecs, iter, 0);
-    Position *vel = ecs_query_iter_get_field(ecs, iter, 1);
+    (void) ecs;
+
+    Position *pos = ecs_query_iter_get_field(iter, 0);
+    Position *vel = ecs_query_iter_get_field(iter, 1);
     for (size_t i = 0; i < iter.count; i++) {
         pos[i].x += vel[i].x;
         pos[i].y += vel[i].y;
@@ -52,6 +54,7 @@ int main(void) {
         // Iterate over all entities within the current archetype.
         move_system(ecs, iter);
     }
+    ecs_query_free(query);
 
     ecs_free(ecs);
 

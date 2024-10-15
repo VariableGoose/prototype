@@ -1,13 +1,9 @@
 #include "ds.h"
 #include "internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-typedef struct Vec2 Vec2;
-struct Vec2 {
-    float x, y;
-};
 
 static void archetype_inspect(const Archetype *archetype) {
     printf("Archetype (%p)\n", archetype);
@@ -18,9 +14,13 @@ static void archetype_inspect(const Archetype *archetype) {
     printf("    Storage:\n");
     for (size_t i = 0; i < vec_len(archetype->type); i++) {
         printf("    [%zu] = {\n", i);
-        Vec2 *arr = archetype->storage[i];
+        uint8_t *arr = archetype->storage[i];
         for (size_t j = 0; j < archetype->current_index; j++) {
-            printf("        (%f, %f),\n", arr[j].x, arr[j].y);
+            printf("        ");
+            for (size_t k = 0; k < vec_element_size(arr); k++) {
+                printf("%.2x ", arr[(j*vec_element_size(arr))+k]);
+            }
+            printf("\n");
         }
         printf("    }\n");
     }
