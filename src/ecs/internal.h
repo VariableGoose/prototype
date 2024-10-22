@@ -66,6 +66,12 @@ struct Component {
     size_t size;
 };
 
+typedef struct InternalSystem InternalSystem;
+struct InternalSystem {
+    System func;
+    QueryDesc desc;
+};
+
 struct ECS {
     HashMap(Str, ComponentId) component_map;
     Vec(Component) components;
@@ -79,4 +85,6 @@ struct ECS {
     uint32_t entity_current_id;
 
     HashMap(ComponentId, HashSet(Archetype *)) component_archetype_set_map;
+
+    Vec(Vec(InternalSystem)) systems;
 };

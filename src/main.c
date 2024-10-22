@@ -30,31 +30,42 @@ int main(void) {
     ecs_register_component(ecs, Velocity);
     ecs_register_component(ecs, Size);
 
+    SystemGroup update_group = ecs_system_group(ecs);
+
+    ecs_register_system(ecs, move_system, update_group, (QueryDesc) {
+            .fields = {
+                [0] = ecs_id(ecs, Position),
+                [1] = ecs_id(ecs, Velocity),
+            },
+        });
+
     Entity ent = ecs_entity(ecs);
     Entity ent2 = ecs_entity(ecs);
     entity_add_component(ecs, ent, Position, {1, 2});
     entity_add_component(ecs, ent, Velocity, {1, 1});
+    entity_add_component(ecs, ent, Size, {0});
 
     entity_add_component(ecs, ent2, Position, {42.0f, 3.1415926f});
     entity_add_component(ecs, ent2, Velocity, {256, 123});
 
-    Query query = ecs_query(ecs, (QueryDesc) {
-            .fields = {
-                [0] = ecs_id(ecs, Position),
-                [1] = ecs_id(ecs, Velocity),
-                QUERY_FIELDS_END,
-            },
-        });
-    printf("count: %zu\n", query.count);
+    ecs_run(ecs, update_group);
+    ecs_run(ecs, update_group);
 
-    // Iterate over all archetypes.
-    for (size_t i = 0; i < query.count; i++) {
-        QueryIter iter = ecs_query_get_iter(query, i);
-        printf("iter count: %zu\n", iter.count);
-        // Iterate over all entities within the current archetype.
-        move_system(ecs, iter);
-    }
-    ecs_query_free(query);
+    // Query query = ecs_query(ecs, (QueryDesc) {
+    //         .fields = {
+    //             [0] = ecs_id(ecs, Position),
+    //             [1] = ecs_id(ecs, Velocity),
+    //             QUERY_FIELDS_END,
+    //         },
+    //     });
+    // printf("count: %zu\n", query.count);
+    // // Iterate over all archetypes.
+    // for (size_t i = 0; i < query.count; i++) {
+    //     QueryIter iter = ecs_query_get_iter(query, i);
+    //     printf("iter count: %zu\n", iter.count);
+    //     // Iterate over all entities within the current archetype.
+    //     move_system(ecs, iter);
+    // }
 
     ecs_free(ecs);
 

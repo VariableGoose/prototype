@@ -68,3 +68,11 @@ extern Query ecs_query(ECS *ecs, QueryDesc desc);
 extern QueryIter ecs_query_get_iter(Query query, size_t i);
 extern void *ecs_query_iter_get_field(QueryIter iter, size_t field);
 extern void ecs_query_free(Query query);
+
+// -- System -------------------------------------------------------------------
+typedef size_t SystemGroup;
+typedef void (*System)(ECS *ecs, QueryIter iter);
+
+extern SystemGroup ecs_system_group(ECS *ecs);
+extern void ecs_register_system(ECS *ecs, System system, SystemGroup group, QueryDesc desc);
+extern void ecs_run(ECS *ecs, SystemGroup group);

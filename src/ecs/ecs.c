@@ -50,6 +50,10 @@ void ecs_free(ECS *ecs) {
     }
     hash_map_free(ecs->component_archetype_set_map);
 
+    for (size_t i = 0; i < vec_len(ecs->systems); i++) {
+        vec_free(ecs->systems[i]);
+    }
+
     free(ecs);
 }
 
@@ -121,4 +125,32 @@ void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
     }
     size_t component_size = ecs->components[component_id].size;
     return column->archetype->storage[*row] + component_size*column->index;
+}
+
+SystemGroup ecs_system_group(ECS *ecs) {
+    SystemGroup group = vec_len(ecs->systems);
+    vec_push(ecs->systems, NULL);
+    return group;
+}
+
+void ecs_register_system(ECS *ecs, System system, SystemGroup group, QueryDesc desc) {
+    assert(group < vec_len(ecs->systems));
+
+    vec_push(ecs->systems[group], ((InternalSystem) {
+            .func = system,
+            .desc = desc,
+        }));
+}
+
+void ecs_run(ECS *ecs, SystemGroup group) {
+    assert(group < vec_len(ecs->systems));
+
+    for (size_t i = 0; i < vec_len(ecs->systems[group]); i++) {
+        InternalSystem system = ecs->systems[group][i];
+        Query query = ecs_query(ecs, system.desc);
+        for (size_t i = 0; i < query.count; i++) {
+            QueryIter iter = ecs_query_get_iter(query, i);
+            system.func(ecs, iter);
+        }
+    }
 }
