@@ -113,6 +113,8 @@ ArchetypeColumn archetype_add_entity(Archetype *archetype, Entity entity) {
 static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next, size_t current_column) {
     // Swap place of the last entity and the one being moved.
     Entity last_current_entity = hash_map_get(current->entity_lookup, current->current_index-1);
+    // It's crucial that we get the entity to move before doing all the swaping.
+    Entity entity_to_move = hash_map_get(current->entity_lookup, current_column);
     ArchetypeColumn column = {
         .archetype = current,
         .index = current_column,
@@ -124,7 +126,6 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
 
     // Place the entity in the next archetype.
     size_t next_column = next->current_index++;
-    Entity entity_to_move = hash_map_get(current->entity_lookup, current_column);
     hash_map_insert(next->entity_lookup, next_column, entity_to_move);
     column = (ArchetypeColumn) {
         .archetype = next,

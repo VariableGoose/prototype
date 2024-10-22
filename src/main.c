@@ -23,7 +23,7 @@ void move_system(ECS *ecs, QueryIter iter) {
         pos[i].x += vel[i].x;
         pos[i].y += vel[i].y;
 
-        // printf("Moved entity to (%f, %f)\n", pos[i].x, pos[i].y);
+        printf("Moved entity to (%f, %f)\n", pos[i].x, pos[i].y);
     }
 }
 
@@ -42,46 +42,15 @@ int main(void) {
             },
         });
 
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    double ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6;
+    Entity ent = ecs_entity(ecs);
+    entity_add_component(ecs, ent, Position, {1, 1});
+    entity_add_component(ecs, ent, Velocity, {1, 2});
 
-    for (int i = 0; i < 8; i++) {
-        Entity ent = ecs_entity(ecs);
-        printf("%lu\n", ent);
-        entity_add_component(ecs, ent, Position, {1, 1});
-        entity_add_component(ecs, ent, Velocity, {i, 2*i});
-        ecs_entity_kill(ecs, ent);
-    }
+    Entity ent2 = ecs_entity(ecs);
+    entity_add_component(ecs, ent2, Position, {1, 1});
+    entity_add_component(ecs, ent2, Velocity, {2, 4});
 
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6 - ms;
-    printf("diff: %fms\n", ms);
-
-    double last = 0.0f;
-
-    int fps = 0;
-    double fps_timer = 0.0f;
-    while (true) {
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        double curr = ts.tv_sec + ts.tv_nsec/1e9;
-        double dt = curr - last;
-        last = curr;
-
-        fps_timer += dt;
-        fps++;
-        if (fps_timer >= 1.0f) {
-            printf("fps: %u\n", fps);
-            fps = 0;
-            fps_timer = 0.0f;
-        }
-
-        ecs_run(ecs, group);
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6 - ms;
-    printf("diff: %fms\n", ms);
+    ecs_run(ecs, group);
 
     ecs_free(ecs);
 

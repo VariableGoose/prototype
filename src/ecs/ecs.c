@@ -105,11 +105,11 @@ void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const vo
     uint32_t generation = entity >> 32;
     assert(ecs->entity_generation[index] == generation);
 
-    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
-    Archetype *left_archetype = column->archetype;
+    ArchetypeColumn column = hash_map_get(ecs->entity_map, entity);
+    Archetype *left_archetype = column.archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
-    archetype_move_entity_right(ecs, left_archetype, data, component_id, column->index);
+    archetype_move_entity_right(ecs, left_archetype, data, component_id, column.index);
 }
 
 void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
