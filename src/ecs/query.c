@@ -14,17 +14,14 @@ Query ecs_query(ECS *ecs, QueryDesc desc) {
 
         HashSet(Archetype *) set = hash_map_get(ecs->component_archetype_set_map, desc.fields[field_count]);
         if (set == NULL) {
-            printf("Set was null\n");
             return (Query) {0};
         }
         vec_push(sets, set);
     }
 
     if (vec_len(sets) == 0) {
-        printf("No sets\n");
         return (Query) {0};
     } else if (vec_len(sets) == 1) {
-        printf("One set\n");
         Vec(Archetype *) archetypes = hash_set_to_vec(sets[0]);
         return (Query) {
             .count = vec_len(archetypes),

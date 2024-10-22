@@ -1,4 +1,7 @@
+#define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
+#include <time.h>
+#include <stdbool.h>
 
 #include "ecs.h"
 
@@ -20,7 +23,7 @@ void move_system(ECS *ecs, QueryIter iter) {
         pos[i].x += vel[i].x;
         pos[i].y += vel[i].y;
 
-        printf("Moved entity to (%f, %f)\n", pos[i].x, pos[i].y);
+        // printf("Moved entity to (%f, %f)\n", pos[i].x, pos[i].y);
     }
 }
 
@@ -30,42 +33,53 @@ int main(void) {
     ecs_register_component(ecs, Velocity);
     ecs_register_component(ecs, Size);
 
-    SystemGroup update_group = ecs_system_group(ecs);
+    SystemGroup group = ecs_system_group(ecs);
 
-    ecs_register_system(ecs, move_system, update_group, (QueryDesc) {
+    ecs_register_system(ecs, move_system, group, (QueryDesc) {
             .fields = {
                 [0] = ecs_id(ecs, Position),
                 [1] = ecs_id(ecs, Velocity),
             },
         });
 
-    Entity ent = ecs_entity(ecs);
-    Entity ent2 = ecs_entity(ecs);
-    entity_add_component(ecs, ent, Position, {1, 2});
-    entity_add_component(ecs, ent, Velocity, {1, 1});
-    entity_add_component(ecs, ent, Size, {0});
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6;
 
-    entity_add_component(ecs, ent2, Position, {42.0f, 3.1415926f});
-    entity_add_component(ecs, ent2, Velocity, {256, 123});
+    for (int i = 0; i < 100000; i++) {
+        Entity ent = ecs_entity(ecs);
+        entity_add_component(ecs, ent, Position, {1, 1});
+        entity_add_component(ecs, ent, Velocity, {i, 2*i});
+    }
 
-    ecs_run(ecs, update_group);
-    ecs_run(ecs, update_group);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6 - ms;
+    printf("diff: %fms\n", ms);
 
-    // Query query = ecs_query(ecs, (QueryDesc) {
-    //         .fields = {
-    //             [0] = ecs_id(ecs, Position),
-    //             [1] = ecs_id(ecs, Velocity),
-    //             QUERY_FIELDS_END,
-    //         },
-    //     });
-    // printf("count: %zu\n", query.count);
-    // // Iterate over all archetypes.
-    // for (size_t i = 0; i < query.count; i++) {
-    //     QueryIter iter = ecs_query_get_iter(query, i);
-    //     printf("iter count: %zu\n", iter.count);
-    //     // Iterate over all entities within the current archetype.
-    //     move_system(ecs, iter);
-    // }
+    double last = 0.0f;
+
+    int fps = 0;
+    double fps_timer = 0.0f;
+    while (true) {
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double curr = ts.tv_sec + ts.tv_nsec/1e9;
+        double dt = curr - last;
+        last = curr;
+
+        fps_timer += dt;
+        fps++;
+        if (fps_timer >= 1.0f) {
+            printf("fps: %u\n", fps);
+            fps = 0;
+            fps_timer = 0.0f;
+        }
+
+        ecs_run(ecs, group);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6 - ms;
+    printf("diff: %fms\n", ms);
 
     ecs_free(ecs);
 

@@ -80,7 +80,7 @@ struct ECS {
     HashMap(Type, Archetype *) archetype_map;
 
     HashMap(Entity, ArchetypeColumn) entity_map;
-    HashMap(uint32_t, uint32_t) entity_generation;
+    Vec(uint32_t) entity_generation;
     Vec(uint32_t) entity_free_list;
     uint32_t entity_current_id;
 

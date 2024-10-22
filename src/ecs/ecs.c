@@ -40,7 +40,7 @@ void ecs_free(ECS *ecs) {
     hash_map_free(ecs->archetype_map);
 
     hash_map_free(ecs->entity_map);
-    hash_map_free(ecs->entity_generation);
+    vec_free(ecs->entity_generation);
     vec_free(ecs->entity_free_list);
 
     for (size_t i = hash_map_iter_new(ecs->component_archetype_set_map);
@@ -69,15 +69,16 @@ Entity _ecs_id(ECS *ecs, Str component_name) {
     return hash_map_get(ecs->component_map, component_name);
 }
 
+// TODO: Replace generation with just a plain vector for faster operations.
 Entity ecs_entity(ECS *ecs) {
     uint32_t index = 0;
     uint32_t generation = 0;
     if (vec_len(ecs->entity_free_list) > 0) {
         index = vec_pop(ecs->entity_free_list);
-        generation = hash_map_get(ecs->entity_generation, index);
+        generation = ecs->entity_generation[index];
     } else {
         index = ecs->entity_current_id++;
-        hash_map_set(ecs->entity_generation, index, generation);
+        vec_push(ecs->entity_generation, 0);
     }
 
     Entity id = index | (uint64_t) generation << 32;
@@ -90,7 +91,7 @@ Entity ecs_entity(ECS *ecs) {
 void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const void *data) {
     uint32_t index = entity;
     uint32_t generation = entity >> 32;
-    assert(hash_map_get(ecs->entity_generation, index) == generation);
+    assert(ecs->entity_generation[index] == generation);
 
     ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     Archetype *left_archetype = column->archetype;
@@ -102,7 +103,7 @@ void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const vo
 void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
     uint32_t index = entity;
     uint32_t generation = entity >> 32;
-    assert(hash_map_get(ecs->entity_generation, index) == generation);
+    assert(ecs->entity_generation[index] == generation);
 
     ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     Archetype *right_archetype = column->archetype;
@@ -114,7 +115,7 @@ void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
 void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
     uint32_t index = entity;
     uint32_t generation = entity >> 32;
-    assert(hash_map_get(ecs->entity_generation, index) == generation);
+    assert(ecs->entity_generation[index] == generation);
 
     ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
