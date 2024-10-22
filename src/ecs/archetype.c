@@ -113,7 +113,6 @@ ArchetypeColumn archetype_add_entity(Archetype *archetype, Entity entity) {
 static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next, size_t current_column) {
     // Swap place of the last entity and the one being moved.
     Entity last_current_entity = hash_map_get(current->entity_lookup, current->current_index-1);
-    Entity entity_to_move = hash_map_get(current->entity_lookup, current_column);
     ArchetypeColumn column = {
         .archetype = current,
         .index = current_column,
@@ -125,6 +124,7 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
 
     // Place the entity in the next archetype.
     size_t next_column = next->current_index++;
+    Entity entity_to_move = hash_map_get(current->entity_lookup, current_column);
     hash_map_insert(next->entity_lookup, next_column, entity_to_move);
     column = (ArchetypeColumn) {
         .archetype = next,
@@ -216,4 +216,23 @@ void archetype_move_entity_left(ECS *ecs, Archetype *right, ComponentId componen
     }
 
     archetype_move_entity(ecs, right, left, right_column);
+}
+
+void archetype_remove_entity(ECS *ecs, Archetype *archetype, size_t column) {
+    // Swap place of the last entity and the one being removed.
+    Entity last_entity = hash_map_get(archetype->entity_lookup, archetype->current_index-1);
+    ArchetypeColumn new_column = {
+        .archetype = archetype,
+        .index = column,
+    };
+    hash_map_set(ecs->entity_map, last_entity, new_column);
+    hash_map_set(archetype->entity_lookup, column, last_entity);
+    hash_map_remove(archetype->entity_lookup, archetype->current_index-1);
+    archetype->current_index--;
+
+    // Remove the moved entity column and place the last entity column into the
+    // now empty column.
+    for (size_t i = 0; i < type_len(archetype->type); i++) {
+        _vec_remove_fast(&archetype->storage[i], column, NULL);
+    }
 }

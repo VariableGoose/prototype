@@ -69,7 +69,6 @@ Entity _ecs_id(ECS *ecs, Str component_name) {
     return hash_map_get(ecs->component_map, component_name);
 }
 
-// TODO: Replace generation with just a plain vector for faster operations.
 Entity ecs_entity(ECS *ecs) {
     uint32_t index = 0;
     uint32_t generation = 0;
@@ -86,6 +85,19 @@ Entity ecs_entity(ECS *ecs) {
     hash_map_insert(ecs->entity_map, id, column);
 
     return id;
+}
+
+void ecs_entity_kill(ECS *ecs, Entity entity) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    assert(ecs->entity_generation[index] == generation);
+
+    ecs->entity_generation[index]++;
+    vec_push(ecs->entity_free_list, index);
+
+    HashMapIter iter = hash_map_remove(ecs->entity_map, entity);
+    ArchetypeColumn column = ecs->entity_map[iter].value;
+    archetype_remove_entity(ecs, column.archetype, column.index);
 }
 
 void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const void *data) {

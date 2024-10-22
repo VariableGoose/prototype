@@ -21,6 +21,7 @@ extern Entity _ecs_id(ECS *ecs, Str component_name);
 
 // -- Entity -------------------------------------------------------------------
 extern Entity ecs_entity(ECS *ecs);
+extern void ecs_entity_kill(ECS *ecs, Entity entity);
 
 #define entity_add_component(ecs, entity, component, ...) \
     _entity_add_component(ecs, entity, str_lit(#component), &(component)__VA_ARGS__)

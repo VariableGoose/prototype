@@ -46,10 +46,12 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double ms = (float) ts.tv_sec*1e3 + ts.tv_nsec/1e6;
 
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 8; i++) {
         Entity ent = ecs_entity(ecs);
+        printf("%lu\n", ent);
         entity_add_component(ecs, ent, Position, {1, 1});
         entity_add_component(ecs, ent, Velocity, {i, 2*i});
+        ecs_entity_kill(ecs, ent);
     }
 
     clock_gettime(CLOCK_MONOTONIC, &ts);

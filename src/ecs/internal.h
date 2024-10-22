@@ -58,6 +58,7 @@ extern void archetype_free(Archetype *archetype);
 extern ArchetypeColumn archetype_add_entity(Archetype *archetype, Entity entity);
 extern void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *component_data, ComponentId component_id, size_t left_column);
 extern void archetype_move_entity_left(ECS *ecs, Archetype *right, ComponentId component_id, size_t right_column);
+extern void archetype_remove_entity(ECS *ecs, Archetype *archetype, size_t column);
 
 // -- ECS ----------------------------------------------------------------------
 // The central structure connecting every other internal part.
