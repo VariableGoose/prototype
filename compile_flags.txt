@@ -7,3 +7,4 @@
 -Iinclude
 -Isrc
 -Ilibs/ds/include
+-Ilibs/glad/include

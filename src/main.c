@@ -5,54 +5,43 @@
 
 #include "ecs.h"
 
-typedef struct Vec2 Vec2;
-struct Vec2 {
-    float x, y;
-};
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+#include <glad/gl.h>
 
-typedef Vec2 Position;
-typedef Vec2 Velocity;
-typedef Vec2 Size;
-
-void move_system(ECS *ecs, QueryIter iter) {
-    (void) ecs;
-
-    Position *pos = ecs_query_iter_get_field(iter, 0);
-    Position *vel = ecs_query_iter_get_field(iter, 1);
-    for (size_t i = 0; i < iter.count; i++) {
-        pos[i].x += vel[i].x;
-        pos[i].y += vel[i].y;
-
-        printf("Moved entity to (%f, %f)\n", pos[i].x, pos[i].y);
-    }
+float get_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec/1e9;
 }
 
 int main(void) {
     ECS *ecs = ecs_new();
-    ecs_register_component(ecs, Position);
-    ecs_register_component(ecs, Velocity);
-    ecs_register_component(ecs, Size);
 
-    SystemGroup group = ecs_system_group(ecs);
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_RESIZABLE, false);
+    GLFWwindow *window = glfwCreateWindow(800, 600, "Frame engine", NULL, NULL);
+    glfwMakeContextCurrent(window);
 
-    ecs_register_system(ecs, move_system, group, (QueryDesc) {
-            .fields = {
-                [0] = ecs_id(ecs, Position),
-                [1] = ecs_id(ecs, Velocity),
-            },
-        });
+    if (!gladLoadGL(glfwGetProcAddress)) {
+        printf("ERROR: GLAD failed to load.\n");
+        return 1;
+    }
 
-    Entity ent = ecs_entity(ecs);
-    entity_add_component(ecs, ent, Position, {1, 1});
-    entity_add_component(ecs, ent, Velocity, {1, 2});
+    while (!glfwWindowShouldClose(window)) {
+        glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
 
-    Entity ent2 = ecs_entity(ecs);
-    entity_add_component(ecs, ent2, Position, {1, 1});
-    entity_add_component(ecs, ent2, Velocity, {2, 4});
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
 
-    ecs_run(ecs, group);
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     ecs_free(ecs);
-
     return 0;
 }
