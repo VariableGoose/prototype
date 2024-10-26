@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "ecs.h"
+#include "gfx.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -24,6 +25,7 @@ int main(void) {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, false);
     GLFWwindow *window = glfwCreateWindow(800, 600, "Frame engine", NULL, NULL);
+    glfwSwapInterval(0);
     glfwMakeContextCurrent(window);
 
     if (!gladLoadGL(glfwGetProcAddress)) {
@@ -31,13 +33,26 @@ int main(void) {
         return 1;
     }
 
+    Renderer *renderer = renderer_new(4096);
+
     while (!glfwWindowShouldClose(window)) {
-        glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
+        glClearColor(color_arg(color_rgb_hex(0x212121)));
         glClear(GL_COLOR_BUFFER_BIT);
+
+        renderer_begin(renderer);
+        renderer_draw_quad(renderer, (Quad) {
+                .x = 0, .y = 0,
+                .w = 1, .h = 1,
+            }, color_rgb_hex(0xffffff));
+
+        renderer_end(renderer);
+        renderer_submit(renderer);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    renderer_free(renderer);
 
     glfwDestroyWindow(window);
     glfwTerminate();
