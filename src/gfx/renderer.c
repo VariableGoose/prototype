@@ -9,6 +9,7 @@
 #include <glad/gl.h>
 
 #include "linear_algebra.h"
+#include "str.h"
 
 // -- Batch Renderer -----------------------------------------------------------
 // Batching quads together to reduce draw calls at the expense of using a lot
@@ -28,6 +29,7 @@ struct BatchRenderer {
     uint32_t vbo;
     // Index buffer
     uint32_t ibo;
+    uint32_t shader;
 
     uint32_t max_batch_size;
     BrVertex *verts;
@@ -43,6 +45,42 @@ static BatchRenderer br_new(uint32_t max_batch_size) {
         .verts = malloc(vertex_count*sizeof(BrVertex)),
     };
 
+    // Create shader.
+    int success;
+    char info_log[512];
+
+    Str vertex_source = read_file("assets/shaders/br.vert.glsl");
+    Str fragment_source = read_file("assets/shaders/br.frag.glsl");
+
+    uint32_t vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, (const char **) &vertex_source.data, (int *) &vertex_source.len);
+    glCompileShader(vertex_shader);
+    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
+        printf("ERROR: Vertex shader compilation failed.\n%s", info_log);
+    }
+
+    uint32_t fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, (const char **) &fragment_source.data, (int *) &fragment_source.len);
+    glCompileShader(fragment_shader);
+    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
+        printf("ERROR: Fragment shader compilation failed.\n%s", info_log);
+    }
+
+    br.shader = glCreateProgram();
+    glAttachShader(br.shader, vertex_shader);
+    glAttachShader(br.shader, fragment_shader);
+    glLinkProgram(br.shader);
+    glGetProgramiv(br.shader, GL_LINK_STATUS, &success);
+    if (!success) {
+        glGetProgramInfoLog(br.shader, 512, NULL, info_log);
+        printf("ERROR: Shader linking failed.\n%s", info_log);
+    }
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
 
     // This needs to be created and bound before the vertex buffer since the
     // vertex layout gets bound to the vertex array.
@@ -109,6 +147,8 @@ static void br_end(BatchRenderer *br) {
 }
 
 static void br_submit(BatchRenderer *br) {
+    glUseProgram(br->shader);
+
     glBindVertexArray(br->vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, br->ibo);
 

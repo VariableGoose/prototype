@@ -28,6 +28,8 @@ int main(void) {
     glfwSwapInterval(0);
     glfwMakeContextCurrent(window);
 
+    // TODO: Move the glad dependency into the renderer so the user doesn't
+    // have to worry about it.
     if (!gladLoadGL(glfwGetProcAddress)) {
         printf("ERROR: GLAD failed to load.\n");
         return 1;
@@ -43,7 +45,7 @@ int main(void) {
         renderer_draw_quad(renderer, (Quad) {
                 .x = 0, .y = 0,
                 .w = 1, .h = 1,
-            }, color_rgb_hex(0xffffff));
+            }, color_rgb_hex(0xF44336));
 
         renderer_end(renderer);
         renderer_submit(renderer);
