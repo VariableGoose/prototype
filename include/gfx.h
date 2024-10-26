@@ -50,6 +50,7 @@ typedef struct Renderer Renderer;
 extern Renderer *renderer_new(uint32_t max_batch_size);
 extern void renderer_free(Renderer *renderer);
 
+extern void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height);
 extern void renderer_begin(Renderer *renderer);
 extern void renderer_end(Renderer *renderer);
 extern void renderer_submit(Renderer *renderer);

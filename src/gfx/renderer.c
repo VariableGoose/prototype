@@ -34,6 +34,11 @@ struct BatchRenderer {
     uint32_t max_batch_size;
     BrVertex *verts;
     uint32_t curr_quad;
+
+    struct {
+        uint32_t width;
+        uint32_t height;
+    } screen;
 };
 
 static BatchRenderer br_new(uint32_t max_batch_size) {
@@ -134,6 +139,12 @@ static void br_free(BatchRenderer br) {
     glDeleteVertexArrays(1, &br.vao);
     glDeleteBuffers(1, &br.vbo);
     glDeleteBuffers(1, &br.ibo);
+    free(br.verts);
+}
+
+static void br_update(BatchRenderer *br, uint32_t screen_width, uint32_t screen_height) {
+    br->screen.width = screen_width;
+    br->screen.height = screen_height;
 }
 
 static void br_begin(BatchRenderer *br) {
@@ -148,6 +159,8 @@ static void br_end(BatchRenderer *br) {
 
 static void br_submit(BatchRenderer *br) {
     glUseProgram(br->shader);
+    uint32_t uniform_location = glGetUniformLocation(br->shader, "screen_size");
+    glUniform2iv(uniform_location, 1, (int *) &br->screen.width);
 
     glBindVertexArray(br->vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, br->ibo);
@@ -167,10 +180,10 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, Color color) {
     };
 
     const Vec2 pos[4] = {
-        vec2(-0.5f, -0.5f),
-        vec2( 0.5f, -0.5f),
-        vec2(-0.5f,  0.5f),
-        vec2( 0.5f,  0.5f),
+        vec2(0.0f, 1.0f),
+        vec2(1.0f, 1.0f),
+        vec2(0.0f, 0.0f),
+        vec2(1.0f, 0.0f),
     };
 
     for (uint8_t i = 0; i < 4; i++) {
@@ -206,6 +219,10 @@ Renderer *renderer_new(uint32_t max_batch_size) {
 void renderer_free(Renderer *renderer) {
     br_free(renderer->br);
     free(renderer);
+}
+
+void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height) {
+    br_update(&renderer->br, screen_width, screen_height);
 }
 
 void renderer_begin(Renderer *renderer) {

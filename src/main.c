@@ -41,11 +41,21 @@ int main(void) {
         glClearColor(color_arg(color_rgb_hex(0x212121)));
         glClear(GL_COLOR_BUFFER_BIT);
 
+        int width, height;
+        glfwGetWindowSize(window, &width, &height);
+        renderer_update(renderer, width, height);
         renderer_begin(renderer);
         renderer_draw_quad(renderer, (Quad) {
-                .x = 0, .y = 0,
-                .w = 1, .h = 1,
-            }, color_rgb_hex(0xF44336));
+                .x = 100, .y = 100,
+                .w = 100, .h = 100,
+            }, color_rgb_hex(0xffffff));
+
+        double x, y;
+        glfwGetCursorPos(window, &x, &y);
+        renderer_draw_quad(renderer, (Quad) {
+                .x = x, .y = y,
+                .w = 100, .h = 150,
+            }, color_rgb_hex(0xffffff));
 
         renderer_end(renderer);
         renderer_submit(renderer);
