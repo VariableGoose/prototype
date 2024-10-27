@@ -62,12 +62,7 @@ int main(void) {
     // glfwSwapInterval(0);
     glfwMakeContextCurrent(window);
 
-    // TODO: Move the glad dependency into the renderer so the user doesn't
-    // have to worry about it.
-    if (!gladLoadGL(glfwGetProcAddress)) {
-        printf("ERROR: GLAD failed to load.\n");
-        return 1;
-    }
+    gfx_init(glfwGetProcAddress);
 
     Renderer *renderer = renderer_new(4096);
 

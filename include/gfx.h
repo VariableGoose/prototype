@@ -2,6 +2,12 @@
 
 #include <stdint.h>
 
+typedef void (*GlFunc)(void);
+typedef GlFunc (*GlLoadFunc)(const char *func_name);
+
+extern void gfx_init(GlLoadFunc gl_load_func);
+
+// -- Color --------------------------------------------------------------------
 typedef struct Color Color;
 struct Color {
     float r, g, b, a;
