@@ -155,15 +155,19 @@ void ecs_register_system(ECS *ecs, System system, SystemGroup group, QueryDesc d
         }));
 }
 
-void ecs_run(ECS *ecs, SystemGroup group) {
+void ecs_run_group(ECS *ecs, SystemGroup group) {
     assert(group < vec_len(ecs->systems));
 
     for (size_t i = 0; i < vec_len(ecs->systems[group]); i++) {
         InternalSystem system = ecs->systems[group][i];
-        Query query = ecs_query(ecs, system.desc);
-        for (size_t i = 0; i < query.count; i++) {
-            QueryIter iter = ecs_query_get_iter(query, i);
-            system.func(ecs, iter);
-        }
+        ecs_run_system(ecs, system.func, system.desc);
+    }
+}
+
+void ecs_run_system(ECS *ecs, System system, QueryDesc desc) {
+    Query query = ecs_query(ecs, desc);
+    for (size_t i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        system(ecs, iter, desc.user_ptr);
     }
 }

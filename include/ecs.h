@@ -46,6 +46,7 @@ static const Entity QUERY_FIELDS_END = -1;
 typedef struct QueryDesc QueryDesc;
 struct QueryDesc {
     Entity fields[MAX_QUERY_FIELDS];
+    void *user_ptr;
 };
 
 typedef struct Query Query;
@@ -72,8 +73,9 @@ extern void ecs_query_free(Query query);
 
 // -- System -------------------------------------------------------------------
 typedef size_t SystemGroup;
-typedef void (*System)(ECS *ecs, QueryIter iter);
+typedef void (*System)(ECS *ecs, QueryIter iter, void *user_ptr);
 
 extern SystemGroup ecs_system_group(ECS *ecs);
 extern void ecs_register_system(ECS *ecs, System system, SystemGroup group, QueryDesc desc);
-extern void ecs_run(ECS *ecs, SystemGroup group);
+extern void ecs_run_group(ECS *ecs, SystemGroup group);
+extern void ecs_run_system(ECS *ecs, System system, QueryDesc desc);
