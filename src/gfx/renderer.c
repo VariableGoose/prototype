@@ -1,4 +1,6 @@
+#include "ds.h"
 #include "gfx.h"
+#include "internal.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -7,38 +9,18 @@
 #include <stdio.h>
 
 #include <glad/gl.h>
+#include <unibreakdef.h>
 
-#include "linear_algebra.h"
 #include "str.h"
 
 // -- Batch Renderer -----------------------------------------------------------
 // Batching quads together to reduce draw calls at the expense of using a lot
 // more memory and VRAM.
-typedef struct BrVertex BrVertex;
-struct BrVertex {
-    Vec2 pos;
-    Vec2 uv;
-    Color color;
-};
-
-typedef struct BatchRenderer BatchRenderer;
-struct BatchRenderer {
-    // Vertex array
-    uint32_t vao;
-    // Vertex buffer
-    uint32_t vbo;
-    // Index buffer
-    uint32_t ibo;
-    uint32_t shader;
-
-    uint32_t max_batch_size;
-    BrVertex *verts;
-    uint32_t curr_quad;
-
-    struct {
-        uint32_t width;
-        uint32_t height;
-    } screen;
+typedef struct TextureAtlasInternal TextureAtlasInternal;
+struct TextureAtlasInternal {
+    uint32_t id;
+    uint32_t u0, v0;
+    uint32_t u1, v1;
 };
 
 static BatchRenderer br_new(uint32_t max_batch_size) {
@@ -87,6 +69,15 @@ static BatchRenderer br_new(uint32_t max_batch_size) {
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
 
+    glUseProgram(br.shader);
+    uint32_t location = glGetUniformLocation(br.shader, "textures");
+    int32_t samplers[32] = {0};
+    for (uint32_t i = 0; i < ARRAY_LEN(samplers); i++) {
+        samplers[i] = i;
+    }
+    glUniform1iv(location, ARRAY_LEN(samplers), samplers);
+    glUseProgram(0);
+
     // This needs to be created and bound before the vertex buffer since the
     // vertex layout gets bound to the vertex array.
     glGenVertexArrays(1, &br.vao);
@@ -102,6 +93,8 @@ static BatchRenderer br_new(uint32_t max_batch_size) {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(2, 4, GL_FLOAT, false, sizeof(BrVertex), (const void *) offsetof(BrVertex, color));
     glEnableVertexAttribArray(2);
+    glVertexAttribPointer(3, 4, GL_UNSIGNED_INT, false, sizeof(BrVertex), (const void *) offsetof(BrVertex, texture_index));
+    glEnableVertexAttribArray(3);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -149,6 +142,7 @@ static void br_update(BatchRenderer *br, uint32_t screen_width, uint32_t screen_
 
 static void br_begin(BatchRenderer *br) {
     br->curr_quad = 0;
+    br->curr_texture = 0;
 }
 
 static void br_end(BatchRenderer *br) {
@@ -159,6 +153,11 @@ static void br_end(BatchRenderer *br) {
 
 static void br_submit(BatchRenderer *br) {
     glUseProgram(br->shader);
+    for (uint32_t i = 0; i < br->curr_texture; i++) {
+        glActiveTexture(GL_TEXTURE0+i);
+        glBindTexture(GL_TEXTURE_2D, br->textures[i]);
+    }
+
     uint32_t uniform_location = glGetUniformLocation(br->shader, "screen_size");
     glUniform2iv(uniform_location, 1, (int *) &br->screen.width);
 
@@ -171,12 +170,34 @@ static void br_submit(BatchRenderer *br) {
     glBindVertexArray(0);
 }
 
-static void br_draw_quad(BatchRenderer *br, Quad quad, Color color) {
+static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atlas, Color color) {
+    if (br->curr_quad == br->max_batch_size || br->curr_texture == 32) {
+        br_end(br);
+        br_submit(br);
+        br_begin(br);
+    }
+
+    uint32_t texture_index = 0;
+    bool new_texture = true;
+    for (uint32_t i = 0; i < br->curr_texture; i++) {
+        if (br->textures[i] == atlas.id) {
+            texture_index = i;
+            new_texture = false;
+            break;
+        }
+    }
+
+    if (new_texture) {
+        br->textures[br->curr_texture] = atlas.id;
+        texture_index = br->curr_texture;
+        br->curr_texture++;
+    }
+
     const Vec2 uvs[4] = {
-        vec2(0.0f, 0.0f),
-        vec2(1.0f, 0.0f),
-        vec2(0.0f, 1.0f),
-        vec2(1.0f, 1.0f),
+        vec2(atlas.u0, atlas.v1),
+        vec2(atlas.u1, atlas.v1),
+        vec2(atlas.u0, atlas.v0),
+        vec2(atlas.u1, atlas.v0),
     };
 
     const Vec2 pos[4] = {
@@ -197,17 +218,13 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, Color color) {
 
         vert->uv = uvs[i];
         vert->color = color;
-
+        vert->texture_index = texture_index;
     }
     br->curr_quad++;
 }
 
 // -- Renderer -----------------------------------------------------------------
 // User facing renderer api.
-struct Renderer {
-    BatchRenderer br;
-};
-
 Renderer *renderer_new(uint32_t max_batch_size) {
     Renderer *rend = malloc(sizeof(Renderer));
     *rend = (Renderer) {
@@ -217,6 +234,11 @@ Renderer *renderer_new(uint32_t max_batch_size) {
 }
 
 void renderer_free(Renderer *renderer) {
+    for (size_t i = 0; i < vec_len(renderer->textures); i++) {
+        glDeleteTextures(1, &renderer->textures[i].id);
+    }
+    vec_free(renderer->textures);
+
     br_free(renderer->br);
     free(renderer);
 }
@@ -237,6 +259,26 @@ void renderer_submit(Renderer *renderer) {
     br_submit(&renderer->br);
 }
 
-void renderer_draw_quad(Renderer *renderer, Quad quad, Color color) {
-    br_draw_quad(&renderer->br, quad, color);
+void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color color) {
+    br_draw_quad(&renderer->br,
+            quad,
+            (TextureAtlasInternal) {
+                renderer->textures[texture].id,
+                0, 0,
+                1, 1
+            },
+            color);
+}
+
+void renderer_draw_quad_atlast(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color) {
+    br_draw_quad(&renderer->br,
+            quad,
+            (TextureAtlasInternal) {
+                .id = renderer->textures[atlas.atlas].id,
+                .u0 = atlas.u0,
+                .v0 = atlas.u0,
+                .u1 = atlas.u1,
+                .v1 = atlas.v1,
+            },
+            color);
 }

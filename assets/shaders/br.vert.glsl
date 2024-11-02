@@ -3,15 +3,18 @@
 layout (location = 0) in vec2 pos;
 layout (location = 1) in vec2 uv;
 layout (location = 2) in vec4 color;
+layout (location = 3) in uint texture_index;
 
 out vec2 f_uv;
 out vec4 f_color;
+flat out uint f_texture_index;
 
 uniform ivec2 screen_size;
 
 void main() {
     f_uv = uv;
     f_color = color;
+    f_texture_index = texture_index;
 
     vec2 half_screen = screen_size/2.0;
     vec2 screen_pos = pos;
