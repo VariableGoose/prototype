@@ -1,14 +1,18 @@
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <time.h>
+#include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "ecs.h"
 #include "gfx.h"
+#include "font.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
+#include <stb_image_write.h>
 
 typedef Quad Transform;
 
@@ -58,32 +62,27 @@ int main(void) {
     gfx_init(glfwGetProcAddress);
 
     Renderer *renderer = renderer_new(4096);
-    unsigned char pixels[] = {
-        255, 0, 0,   // 255,
-        0, 255, 0,   // 255,
-        0, 0, 255,   // 255,
-        255, 255, 0, // 255,
-    };
-    Texture texture = texture_new(renderer, (TextureDesc) {
-            .width = 2,
-            .height = 2,
+
+    Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), 32, false);
+    // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), 24, false);
+
+    uint8_t *rgba = malloc(font.atlas.size.x*font.atlas.size.y*4);
+    for (int32_t i = 0; i < font.atlas.size.x*font.atlas.size.y; i++) {
+        rgba[i*4 + 0] = 255;
+        rgba[i*4 + 1] = 255;
+        rgba[i*4 + 2] = 255;
+        rgba[i*4 + 3] = font.atlas.buffer[i];
+    }
+    // stbi_write_png("atlas.png", font.atlas.size.x, font.atlas.size.y, 4, rgba, sizeof(uint8_t)*4*font.atlas.size.x);
+
+    Texture font_texture = texture_new(renderer, (TextureDesc) {
+            .width = font.atlas.size.x,
+            .height = font.atlas.size.y,
             .format = TEXTURE_FORMAT_RGBA,
             .data_type = TEXTURE_DATA_TYPE_UBYTE,
-            .pixels = pixels,
+            .pixels = rgba,
             .sampler = TEXTURE_SAMPLER_NEAREST,
         });
-
-    // Entity ent = ecs_entity(ecs);
-    // entity_add_component(ecs, ent, Transform, {100, 100, 100, 100});
-    // entity_add_component(ecs, ent, Renderable, {color_rgb_hex(0xff00ff), texture});
-    //
-    // Entity ent2 = ecs_entity(ecs);
-    // entity_add_component(ecs, ent2, Transform, {100, 300, 100, 50});
-    // entity_add_component(ecs, ent2, Renderable, {color_rgb_hex(0xffff00), texture});
-
-    Entity ent3 = ecs_entity(ecs);
-    entity_add_component(ecs, ent3, Transform, {300, 300, 100, 100});
-    entity_add_component(ecs, ent3, Renderable, {color_rgb_hex(0xffffff), texture});
 
     while (!glfwWindowShouldClose(window)) {
         glClearColor(color_arg(color_rgb_hex(0x000000)));
@@ -94,10 +93,38 @@ int main(void) {
         renderer_update(renderer, width, height);
         renderer_begin(renderer);
 
-        renderer_draw_quad(renderer, (Quad) {
-                    .x = 100, .y = 100,
-                    .w = 100, .h = 100,
-                }, texture, color_rgb_hex(0xffffff));
+        // renderer_draw_quad(renderer, (Quad) {
+        //         .x = 0, .y = 0,
+        //         .w = font.atlas.size.x, font.atlas.size.y,
+        //     }, font_texture, color_rgb_hex(0xffffff));
+
+        const Str string = str_lit("Hello, World!\nThe quick fox jumps over the lazy dog!");
+        Ivec2 pos = {
+            .y = font.ascent+font.descent,
+        };
+        pos = ivec2_add(pos, ivec2s(16));
+        for (size_t i = 0; i < string.len; i++) {
+            if (string.data[i] == '\n') {
+                pos.x = 16;
+                pos.y += font.line_gap;
+                continue;
+            }
+
+            Glyph glyph = font_get_glyph(font, string.data[i]);
+            renderer_draw_quad_atlas(renderer, (Quad) {
+                    .x = pos.x + glyph.offset.x,
+                    .y = pos.y - glyph.offset.y,
+                    .w = glyph.size.x,
+                    .h = glyph.size.y,
+                }, (TextureAtlas) {
+                    .atlas = font_texture,
+                    .u0 = (float) glyph.uv[0].x / font.atlas.size.x,
+                    .v0 = (float) glyph.uv[0].y / font.atlas.size.y,
+                    .u1 = (float) glyph.uv[1].x / font.atlas.size.x,
+                    .v1 = (float) glyph.uv[1].y / font.atlas.size.y,
+                }, color_rgb_hex(0xffffff));
+            pos.x += glyph.advance;
+        }
 
         // ecs_run_system(ecs, render, (QueryDesc) {
         //         .user_ptr = renderer, 
@@ -113,6 +140,8 @@ int main(void) {
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    font_free(font);
 
     renderer_free(renderer);
 

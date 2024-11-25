@@ -1,3 +1,6 @@
 [submodule "libs/ds"]
 	path = libs/ds
 	url = git@github.com:linusepk/ds.git
+[submodule "libs/freetype"]
+	path = libs/freetype
+	url = https://gitlab.freedesktop.org/freetype/freetype.git

@@ -8,3 +8,5 @@
 -Isrc
 -Ilibs/ds/include
 -Ilibs/glad/include
+-Ilibs/freetype/include
+-Ilibs/stb

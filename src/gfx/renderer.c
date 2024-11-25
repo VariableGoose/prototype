@@ -19,8 +19,8 @@
 typedef struct TextureAtlasInternal TextureAtlasInternal;
 struct TextureAtlasInternal {
     uint32_t id;
-    uint32_t u0, v0;
-    uint32_t u1, v1;
+    float u0, v0;
+    float u1, v1;
 };
 
 static BatchRenderer br_new(uint32_t max_batch_size) {
@@ -270,13 +270,13 @@ void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color co
             color);
 }
 
-void renderer_draw_quad_atlast(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color) {
+void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color) {
     br_draw_quad(&renderer->br,
             quad,
             (TextureAtlasInternal) {
                 .id = renderer->textures[atlas.atlas].id,
                 .u0 = atlas.u0,
-                .v0 = atlas.u0,
+                .v0 = atlas.v0,
                 .u1 = atlas.u1,
                 .v1 = atlas.v1,
             },

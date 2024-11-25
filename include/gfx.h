@@ -81,7 +81,7 @@ struct TextureAtlas {
 // Draws a quad onto the screen using screen coordinates.
 // Origin in the top left corner.
 extern void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color color);
-extern void renderer_draw_quad_atlast(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color);
+extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color);
 
 // -- Texture ------------------------------------------------------------------
 typedef enum {
