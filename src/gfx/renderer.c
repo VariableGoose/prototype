@@ -1,3 +1,4 @@
+#include "core.h"
 #include "ds.h"
 #include "gfx.h"
 #include "internal.h"
@@ -23,21 +24,24 @@ struct TextureAtlasInternal {
     float u1, v1;
 };
 
-static BatchRenderer br_new(uint32_t max_batch_size) {
+static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
     // Multiply by 4 because each quad has 4 vertices.
     uint32_t vertex_count = max_batch_size*4;
 
     BatchRenderer br = {
+        .allocator = allocator,
         .max_batch_size = max_batch_size,
-        .verts = malloc(vertex_count*sizeof(BrVertex)),
+        .verts = allocator.alloc(vertex_count*sizeof(BrVertex), allocator.ctx),
     };
 
     // Create shader.
     int success;
     char info_log[512];
 
-    Str vertex_source = read_file("assets/shaders/br.vert.glsl");
-    Str fragment_source = read_file("assets/shaders/br.frag.glsl");
+    // TODO: Replace 'ALLOCATOR_LIBC' with a scratch arena or another form of
+    // temporary allocator.
+    Str vertex_source = read_file("assets/shaders/br.vert.glsl", ALLOCATOR_LIBC);
+    Str fragment_source = read_file("assets/shaders/br.frag.glsl", ALLOCATOR_LIBC);
 
     uint32_t vertex_shader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertex_shader, 1, (const char **) &vertex_source.data, (int *) &vertex_source.len);
@@ -47,6 +51,7 @@ static BatchRenderer br_new(uint32_t max_batch_size) {
         glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
         printf("ERROR: Vertex shader compilation failed.\n%s", info_log);
     }
+    free((char *) vertex_source.data);
 
     uint32_t fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment_shader, 1, (const char **) &fragment_source.data, (int *) &fragment_source.len);
@@ -56,6 +61,7 @@ static BatchRenderer br_new(uint32_t max_batch_size) {
         glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
         printf("ERROR: Fragment shader compilation failed.\n%s", info_log);
     }
+    free((char *) fragment_source.data);
 
     br.shader = glCreateProgram();
     glAttachShader(br.shader, vertex_shader);
@@ -132,7 +138,7 @@ static void br_free(BatchRenderer br) {
     glDeleteVertexArrays(1, &br.vao);
     glDeleteBuffers(1, &br.vbo);
     glDeleteBuffers(1, &br.ibo);
-    free(br.verts);
+    br.allocator.free(br.verts, br.max_batch_size*4*sizeof(BrVertex), br.allocator.ctx);
 }
 
 static void br_update(BatchRenderer *br, uint32_t screen_width, uint32_t screen_height) {
@@ -225,10 +231,11 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atla
 
 // -- Renderer -----------------------------------------------------------------
 // User facing renderer api.
-Renderer *renderer_new(uint32_t max_batch_size) {
-    Renderer *rend = malloc(sizeof(Renderer));
+Renderer *renderer_new(uint32_t max_batch_size, Allocator allocator) {
+    Renderer *rend = allocator.alloc(sizeof(Renderer), allocator.ctx);
     *rend = (Renderer) {
-        .br = br_new(max_batch_size),
+        .allocator = allocator,
+        .br = br_new(max_batch_size, allocator),
     };
     return rend;
 }
@@ -240,7 +247,7 @@ void renderer_free(Renderer *renderer) {
     vec_free(renderer->textures);
 
     br_free(renderer->br);
-    free(renderer);
+    renderer->allocator.free(renderer, sizeof(*renderer), renderer->allocator.ctx);
 }
 
 void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height) {

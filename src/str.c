@@ -19,7 +19,7 @@ int str_cmp(const void *a, const void *b, size_t size) {
     return memcmp(_a->data, _b->data, min(_a->len, _b->len));
 }
 
-Str read_file(const char *filepath) {
+Str read_file(const char *filepath, Allocator allocator) {
     FILE *fp = fopen(filepath, "rb");
     if (fp == NULL) {
         printf("ERROR: Failed to open file %s.\n", filepath);
@@ -29,7 +29,7 @@ Str read_file(const char *filepath) {
     fseek(fp, 0, SEEK_END);
     size_t len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    char *buffer = malloc(len);
+    char *buffer = allocator.alloc(len, allocator.ctx);
     fread(buffer, sizeof(char), len, fp);
 
     return str(buffer, len);

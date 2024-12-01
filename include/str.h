@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core.h"
+
 #include <stddef.h>
 #include <string.h>
 
@@ -17,5 +19,6 @@ struct Str {
 extern size_t str_hash(const void *str, size_t size);
 extern int str_cmp(const void *a, const void *b, size_t size);
 
-// Allocates a char buffer that needs to be freed by calling 'free(str.data);'.
-extern Str read_file(const char *filepath);
+// Allocates a char buffer that needs to be free with the same allocator
+// provided.
+extern Str read_file(const char *filepath, Allocator allocator);

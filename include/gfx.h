@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core.h"
 #include <stdint.h>
 
 typedef void (*GlFunc)(void);
@@ -53,7 +54,10 @@ static inline Color color_rgb_hex(uint32_t hex) {
 // Context containing everything neccessary to perform rendering.
 typedef struct Renderer Renderer;
 
-extern Renderer *renderer_new(uint32_t max_batch_size);
+extern Renderer *renderer_new(uint32_t max_batch_size, Allocator allocator);
+// This function still needs to be called even if renderer was created with a
+// lifetime based allocator becaues it also cleans up OpenGL resources, not
+// only memory.
 extern void renderer_free(Renderer *renderer);
 
 extern void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height);

@@ -228,7 +228,8 @@ Font font_init(Str font_path, uint32_t pixel_height, bool sdf) {
     char *cstr_font_path = malloc(font_path.len + 1);
     memcpy(cstr_font_path, font_path.data, font_path.len);
     cstr_font_path[font_path.len] = 0;
-    Str ttf_data = read_file(cstr_font_path);
+    // TODO: Replace this with some type of scratch/temporary allocator.
+    Str ttf_data = read_file(cstr_font_path, ALLOCATOR_LIBC);
     free(cstr_font_path);
 
     Font font = font_init_memory(ttf_data, pixel_height, sdf);

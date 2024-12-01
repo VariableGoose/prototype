@@ -1,3 +1,4 @@
+#include "core.h"
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <time.h>
@@ -61,7 +62,7 @@ int main(void) {
 
     gfx_init(glfwGetProcAddress);
 
-    Renderer *renderer = renderer_new(4096);
+    Renderer *renderer = renderer_new(4096, ALLOCATOR_LIBC);
 
     Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), 32, false);
     // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), 24, false);

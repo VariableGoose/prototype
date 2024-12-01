@@ -5,6 +5,7 @@
 // intend to implement a stb_truetype backend as well.
 //
 
+// TODO: Support allocator interface.
 // TODO: Implement kerning support.
 
 #include <stdint.h>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core.h"
 #include "gfx.h"
 #include "linear_algebra.h"
 #include <ds.h>
@@ -23,6 +24,8 @@ struct BrVertex {
 
 typedef struct BatchRenderer BatchRenderer;
 struct BatchRenderer {
+    Allocator allocator;
+
     // Vertex array
     uint32_t vao;
     // Vertex buffer
@@ -45,6 +48,7 @@ struct BatchRenderer {
 };
 
 struct Renderer {
+    Allocator allocator;
     BatchRenderer br;
     Vec(TextureInternal) textures;
 };
