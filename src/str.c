@@ -4,8 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
 size_t str_hash(const void *str, size_t size) {
     (void) size;
     const Str *_str = str;
@@ -19,6 +17,15 @@ int str_cmp(const void *a, const void *b, size_t size) {
     return memcmp(_a->data, _b->data, min(_a->len, _b->len));
 }
 
+Str str_copy(Str str, Allocator allocator) {
+    Str copy = {
+        .data = allocator.alloc(str.len, allocator.ctx),
+        .len = str.len,
+    };
+    memcpy((char *) copy.data, str.data, str.len);
+    return copy;
+}
+
 Str read_file(const char *filepath, Allocator allocator) {
     FILE *fp = fopen(filepath, "rb");
     if (fp == NULL) {
@@ -29,7 +36,7 @@ Str read_file(const char *filepath, Allocator allocator) {
     fseek(fp, 0, SEEK_END);
     size_t len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    char *buffer = allocator.alloc(len, allocator.ctx);
+    u8 *buffer = allocator.alloc(len, allocator.ctx);
     fread(buffer, sizeof(char), len, fp);
 
     return str(buffer, len);

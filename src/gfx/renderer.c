@@ -3,10 +3,7 @@
 #include "gfx.h"
 #include "internal.h"
 
-#include <stdint.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdio.h>
 
 #include <glad/gl.h>
@@ -32,6 +29,7 @@ static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
         .allocator = allocator,
         .max_batch_size = max_batch_size,
         .verts = allocator.alloc(vertex_count*sizeof(BrVertex), allocator.ctx),
+        // .verts = malloc(vertex_count*sizeof(BrVertex)),
     };
 
     // Create shader.
@@ -51,7 +49,6 @@ static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
         glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
         printf("ERROR: Vertex shader compilation failed.\n%s", info_log);
     }
-    free((char *) vertex_source.data);
 
     uint32_t fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragment_shader, 1, (const char **) &fragment_source.data, (int *) &fragment_source.len);
@@ -61,7 +58,6 @@ static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
         glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
         printf("ERROR: Fragment shader compilation failed.\n%s", info_log);
     }
-    free((char *) fragment_source.data);
 
     br.shader = glCreateProgram();
     glAttachShader(br.shader, vertex_shader);
@@ -75,13 +71,16 @@ static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
 
+    free((char *) vertex_source.data);
+    free((char *) fragment_source.data);
+
     glUseProgram(br.shader);
     uint32_t location = glGetUniformLocation(br.shader, "textures");
     int32_t samplers[32] = {0};
-    for (uint32_t i = 0; i < ARRAY_LEN(samplers); i++) {
+    for (uint32_t i = 0; i < arrlen(samplers); i++) {
         samplers[i] = i;
     }
-    glUniform1iv(location, ARRAY_LEN(samplers), samplers);
+    glUniform1iv(location, arrlen(samplers), samplers);
     glUseProgram(0);
 
     // This needs to be created and bound before the vertex buffer since the
@@ -99,7 +98,7 @@ static BatchRenderer br_new(uint32_t max_batch_size, Allocator allocator) {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(2, 4, GL_FLOAT, false, sizeof(BrVertex), (const void *) offsetof(BrVertex, color));
     glEnableVertexAttribArray(2);
-    glVertexAttribPointer(3, 4, GL_UNSIGNED_INT, false, sizeof(BrVertex), (const void *) offsetof(BrVertex, texture_index));
+    glVertexAttribIPointer(3, 4, GL_UNSIGNED_INT, sizeof(BrVertex), (const void *) offsetof(BrVertex, texture_index));
     glEnableVertexAttribArray(3);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -174,6 +173,7 @@ static void br_submit(BatchRenderer *br) {
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+    glUseProgram(0);
 }
 
 static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atlas, Color color) {
@@ -184,7 +184,7 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atla
     }
 
     uint32_t texture_index = 0;
-    bool new_texture = true;
+    b8 new_texture = true;
     for (uint32_t i = 0; i < br->curr_texture; i++) {
         if (br->textures[i] == atlas.id) {
             texture_index = i;
@@ -237,6 +237,17 @@ Renderer *renderer_new(uint32_t max_batch_size, Allocator allocator) {
         .allocator = allocator,
         .br = br_new(max_batch_size, allocator),
     };
+    // Texture index 0 is the NULL white texture.
+    texture_new(rend, (TextureDesc) {
+            .width = 1,
+            .height = 1,
+            .format = TEXTURE_FORMAT_RGBA,
+            .data_type = TEXTURE_DATA_TYPE_UBYTE,
+            .sampler = TEXTURE_SAMPLER_NEAREST,
+            .pixels = (u8[]) {
+                255, 255, 255, 255,
+            },
+        });
     return rend;
 }
 

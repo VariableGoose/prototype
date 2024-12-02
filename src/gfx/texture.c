@@ -6,8 +6,7 @@
 
 Texture texture_new(Renderer *renderer, TextureDesc desc) {
     TextureInternal internal = {
-        .width = desc.width,
-        .height = desc.height,
+        .size = ivec2(desc.width, desc.height),
     };
 
     uint32_t gl_internal_format = 0;
@@ -136,4 +135,8 @@ Texture texture_new(Renderer *renderer, TextureDesc desc) {
 
     vec_push(renderer->textures, internal);
     return vec_len(renderer->textures)-1;
+}
+
+Ivec2 texture_get_size(const Renderer *renderer, Texture texture) {
+    return renderer->textures[texture].size;
 }

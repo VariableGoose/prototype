@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include "linear_algebra.h"
 #include <stdint.h>
 
 typedef void (*GlFunc)(void);
@@ -124,3 +125,4 @@ struct TextureDesc {
 };
 
 extern Texture texture_new(Renderer *renderer, TextureDesc desc);
+extern Ivec2 texture_get_size(const Renderer *renderer, Texture texture);

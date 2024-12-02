@@ -1,7 +1,10 @@
 #include "font.h"
+#include "core.h"
 #include "ds.h"
+#include "gfx.h"
 #include "str.h"
 
+#include <GLFW/glfw3.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,9 +35,7 @@ struct FontLoose {
 
     uint32_t pixel_size;
 
-    uint32_t ascent;
-    uint32_t descent;
-    uint32_t line_gap;
+    FontMetrics metrics;
 };
 
 static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_index, uint32_t codepoint, bool sdf) {
@@ -96,9 +97,11 @@ static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool s
     FT_Size_Metrics face_metrics = face->size->metrics;
 
     FontLoose font_loose = {
-        .ascent = face_metrics.ascender >> 6,
-        .descent = face_metrics.descender >> 6,
-        .line_gap = face_metrics.height >> 6,
+        .metrics = {
+            .ascent = face_metrics.ascender >> 6,
+            .descent = face_metrics.descender >> 6,
+            .line_gap = face_metrics.height >> 6,
+        },
         .pixel_size = pixel_size,
     };
 
@@ -120,7 +123,7 @@ static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool s
     return font_loose;
 }
 
-static Font bake_looes_font(FontLoose loose) {
+static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
     GlyphMap map = NULL;
 
     Glyph *glyphs = malloc(sizeof(Glyph) * vec_len(loose.glyphs));
@@ -180,8 +183,8 @@ static Font bake_looes_font(FontLoose loose) {
             row_height = curr.bitmap.size.y;
         }
 
-        glyphs[i].uv[0] = pos;
-        glyphs[i].uv[1] = ivec2_add(pos, curr.bitmap.size);
+        glyphs[i].uv[0] = vec2(vec2_arg(pos));
+        glyphs[i].uv[1] = vec2(vec2_arg(ivec2_add(pos, curr.bitmap.size)));
 
         // Store all packed glyphs in a stack for rendering into atlas.
         PackedGlyph packed = {
@@ -196,65 +199,141 @@ static Font bake_looes_font(FontLoose loose) {
         hash_map_insert(map, curr.codepoint, i);
     }
 
+    for (u64 i = 0; i < vec_len(loose.glyphs); i++) {
+        for (u8 j = 0; j < 2; j++) {
+            glyphs[i].uv[j] = vec2_div(glyphs[i].uv[j], vec2(vec2_arg(atlas_size)));
+        }
+    }
+
     // Construct atlas bitmap.
-    uint8_t *atlas_data = malloc(atlas_size.x*atlas_size.y);
+    uint8_t *atlas_data = malloc(atlas_size.x*atlas_size.y*4);
     for (size_t i = 0; i < vec_len(packed_list); i++) {
         PackedGlyph packed = packed_list[i];
         for (int32_t y = 0; y < packed.size.y; y++) {
             for (int32_t x = 0; x < packed.size.x; x++) {
                 uint32_t index = packed.pos.x + x + (packed.pos.y + y) * atlas_size.x;
-                atlas_data[index] = packed.bitmap[x + y*packed.size.x];
+                atlas_data[index*4+0] = 255;
+                atlas_data[index*4+1] = 255;
+                atlas_data[index*4+2] = 255;
+                atlas_data[index*4+3] = packed.bitmap[x + y*packed.size.x];
             }
         }
     }
 
+    Texture atlas = texture_new(renderer, (TextureDesc) {
+            .width = atlas_size.x,
+            .height = atlas_size.y,
+            .format = TEXTURE_FORMAT_RGBA,
+            .sampler = TEXTURE_SAMPLER_LINEAR,
+            .data_type = TEXTURE_DATA_TYPE_UBYTE,
+            .pixels = atlas_data,
+        });
+
+    free(atlas_data);
+
     vec_free(packed_list);
 
-    return (Font) {
+    return (RigidFont) {
         .size = loose.pixel_size,
-        .ascent = loose.ascent,
-        .descent = loose.descent,
-        .line_gap = loose.line_gap,
+        .metrics = loose.metrics,
         .glyphs = glyphs,
         .glyph_map = map,
-        .atlas = {
-            .buffer = atlas_data,
-            .size = atlas_size,
-        },
+        .atlas = atlas,
     };
 }
 
-Font font_init(Str font_path, uint32_t pixel_height, bool sdf) {
+Font font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator) {
+    // TODO: Replace this with some type of scratch/temporary allocator.
     char *cstr_font_path = malloc(font_path.len + 1);
     memcpy(cstr_font_path, font_path.data, font_path.len);
     cstr_font_path[font_path.len] = 0;
-    // TODO: Replace this with some type of scratch/temporary allocator.
-    Str ttf_data = read_file(cstr_font_path, ALLOCATOR_LIBC);
+    Font font = {
+        .allocator = allocator,
+        .renderer = renderer,
+        .ttf_data = read_file(cstr_font_path, allocator),
+        .sdf = sdf,
+    };
     free(cstr_font_path);
-
-    Font font = font_init_memory(ttf_data, pixel_height, sdf);
-
-    free((char *) ttf_data.data);
 
     return font;
 }
 
-Font font_init_memory(Str font_data, uint32_t pixel_height, bool sdf) {
-    FontLoose loose_font = construct_loose_font(font_data, pixel_height, sdf);
-    Font baked = bake_looes_font(loose_font);
-    for (size_t i = 0; i < vec_len(loose_font.glyphs); i++) {
-        free(loose_font.glyphs[i].bitmap.buffer);
+Font font_init_memory(Str font_data, Renderer *renderer, b8 sdf, Allocator allocator) {
+    Font font = {
+        .allocator = allocator,
+        .renderer = renderer,
+        .ttf_data = str_copy(font_data, allocator),
+        .sdf = sdf,
+    };
+    return font;
+}
+
+void font_free(Font *font) {
+    for (HashMapIter i = hash_map_iter_new(font->size_lookup);
+            hash_map_iter_valid(font->size_lookup, i);
+            i = hash_map_iter_next(font->size_lookup, i)) {
+        RigidFont rigid = font->size_lookup[i].value;
+        free(rigid.glyphs);
+        hash_map_free(rigid.glyph_map);
     }
-    vec_free(loose_font.glyphs);
-    return baked;
+    hash_map_free(font->size_lookup);
+    free((u8 *) font->ttf_data.data);
 }
 
-Glyph font_get_glyph(Font font, uint32_t codepoint) {
-    uint32_t index = hash_map_get(font.glyph_map, codepoint);
-    return font.glyphs[index];
+void font_cache_size(Font *font, u32 size) {
+    if (hash_map_getp(font->size_lookup, size) != NULL) {
+        return;
+    }
+    printf("Font size cached: %u\n", size);
+
+    FontLoose loose = construct_loose_font(font->ttf_data, size, font->sdf);
+    RigidFont rigid = bake_looes_font(loose, font->renderer);
+    for (u32 i = 0; i < vec_len(loose.glyphs); i++) {
+        free(loose.glyphs[i].bitmap.buffer);
+    }
+    vec_free(loose.glyphs);
+    hash_map_insert(font->size_lookup, size, rigid);
 }
 
-void font_free(Font font) {
-    free(font.glyphs);
-    hash_map_free(font.glyph_map);
+Glyph font_get_glyph(Font *font, u32 codepoint, u32 size) {
+    RigidFont *rigid = hash_map_getp(font->size_lookup, size);
+    if (rigid == NULL) {
+        font_cache_size(font, size);
+        rigid = hash_map_getp(font->size_lookup, size);
+    }
+    u32 index = hash_map_get(rigid->glyph_map, codepoint);
+    return rigid->glyphs[index];
+}
+
+Texture font_get_atlas(Font *font, u32 size) {
+    RigidFont *rigid = hash_map_getp(font->size_lookup, size);
+    if (rigid == NULL) {
+        font_cache_size(font, size);
+        rigid = hash_map_getp(font->size_lookup, size);
+    }
+    return rigid->atlas;
+}
+
+FontMetrics font_get_metrics(Font *font, u32 size) {
+    RigidFont *rigid = hash_map_getp(font->size_lookup, size);
+    if (rigid == NULL) {
+        font_cache_size(font, size);
+        rigid = hash_map_getp(font->size_lookup, size);
+    }
+    return rigid->metrics;
+}
+
+Ivec2 font_measure_string(Font *font, Str str, u32 size) {
+    RigidFont *rigid = hash_map_getp(font->size_lookup, size);
+    if (rigid == NULL) {
+        font_cache_size(font, size);
+        rigid = hash_map_getp(font->size_lookup, size);
+    }
+
+    Ivec2 str_size = ivec2(0, rigid->metrics.line_gap + rigid->metrics.descent);
+    for (u64 i = 0; i < str.len; i++) {
+        Glyph glyph = rigid->glyphs[hash_map_get(rigid->glyph_map, str.data[i])];
+        str_size.x += glyph.advance;
+    }
+    return str_size;
 }

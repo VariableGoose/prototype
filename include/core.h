@@ -29,11 +29,11 @@ typedef u32 b32;
 #endif
 
 #define offsetof(S, M) ((u64) (&((S *) 0)->M))
-#define arrlen(ARR) (sizeof(ARR)/((ARR)[0]))
+#define arrlen(ARR) (sizeof(ARR)/(sizeof((ARR)[0])))
 
 #define clamp(V, A, B) ((V) > (A) ? (A) : (V) < (B) ? (B) : (V))
-#define min(V, M) ((V) < (A) ? (A) : (V))
-#define max(V, M) ((V) > (A) ? (A) : (V))
+#define min(A, B) ((A) < (B) ? (A) : (B))
+#define max(A, B) ((A) > (B) ? (A) : (B))
 #define lerp(A, B, T) ((A) + ((B) - (A)) * (T))
 
 typedef struct Allocator Allocator;

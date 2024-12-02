@@ -1,3 +1,4 @@
+#include "core.h"
 #include "ds.h"
 #include "internal.h"
 

@@ -11,9 +11,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include <linear_algebra.h>
-#include <ds.h>
-#include <str.h>
+#include "linear_algebra.h"
+#include "ds.h"
+#include "str.h"
+#include "gfx.h"
 
 typedef struct Glyph Glyph;
 struct Glyph {
@@ -24,44 +25,51 @@ struct Glyph {
     u32 codepoint;
     u32 glyph_index;
 
-    // UV's are measured in pixel offsets from the top left corner of the
-    // texture atlas.
+    // Normalized UV coordinates.
     // [0] = Top left
     // [1] = Bottom right
-    Ivec2 uv[2];
+    Vec2 uv[2];
 };
 
 typedef HashMap(u32, u32) GlyphMap;
 
-typedef struct RigidFont RigidFont;
-struct RigidFont {
-};
-
-typedef struct Font Font;
-struct Font {
-    // Size in pixels
-    u32 size;
-
+typedef struct FontMetrics FontMetrics;
+struct FontMetrics {
     u32 descent;
     u32 ascent;
     u32 line_gap;
+};
+
+typedef struct RigidFont RigidFont;
+struct RigidFont {
+    u32 size;
 
     Glyph *glyphs;
+    FontMetrics metrics;
 
     // Codepoint to glyph map
     // Key:   u32 (codepoint)
     // Value: u32 (glyph index)
     GlyphMap glyph_map;
 
-    // Monocrhome bitmap written from left to right, top to bottom.
-    // Origin in top left.
-    struct {
-        Ivec2 size;
-        u8 *buffer;
-    } atlas;
+    Texture atlas;
 };
 
-extern Font font_init(Str font_path, u32 pixel_height, bool sdf);
-extern Font font_init_memory(Str font_data, u32 pixel_height, bool sdf);
-extern Glyph font_get_glyph(Font font, u32 codepoint);
-extern void font_free(Font font);
+typedef struct Font Font;
+struct Font {
+    Allocator allocator;
+    Renderer *renderer;
+    Str ttf_data;
+    b8 sdf;
+    HashMap(u32, RigidFont) size_lookup;
+};
+
+extern Font font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator);
+extern Font font_init_memory(Str font_data, Renderer *renderer, b8 sdf, Allocator allocator);
+extern void font_free(Font *font);
+extern void font_cache_size(Font *font, u32 size);
+
+extern Glyph font_get_glyph(Font *font, u32 codepoint, u32 size);
+extern Texture font_get_atlas(Font *font, u32 size);
+extern FontMetrics font_get_metrics(Font *font, u32 size);
+extern Ivec2 font_measure_string(Font *font, Str str, u32 size);
