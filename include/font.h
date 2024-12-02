@@ -17,12 +17,12 @@
 
 typedef struct Glyph Glyph;
 struct Glyph {
-    uint32_t advance;
+    u32 advance;
     Ivec2 size;
     Ivec2 offset;
 
-    uint32_t codepoint;
-    uint32_t glyph_index;
+    u32 codepoint;
+    u32 glyph_index;
 
     // UV's are measured in pixel offsets from the top left corner of the
     // texture atlas.
@@ -31,33 +31,37 @@ struct Glyph {
     Ivec2 uv[2];
 };
 
-typedef HashMap(uint32_t, uint32_t) GlyphMap;
+typedef HashMap(u32, u32) GlyphMap;
+
+typedef struct RigidFont RigidFont;
+struct RigidFont {
+};
 
 typedef struct Font Font;
 struct Font {
     // Size in pixels
-    uint32_t size;
+    u32 size;
 
-    uint32_t descent;
-    uint32_t ascent;
-    uint32_t line_gap;
+    u32 descent;
+    u32 ascent;
+    u32 line_gap;
 
     Glyph *glyphs;
 
     // Codepoint to glyph map
-    // Key:   uint32_t (codepoint)
-    // Value: uint32_t (glyph index)
+    // Key:   u32 (codepoint)
+    // Value: u32 (glyph index)
     GlyphMap glyph_map;
 
     // Monocrhome bitmap written from left to right, top to bottom.
     // Origin in top left.
     struct {
         Ivec2 size;
-        uint8_t *buffer;
+        u8 *buffer;
     } atlas;
 };
 
-extern Font font_init(Str font_path, uint32_t pixel_height, bool sdf);
-extern Font font_init_memory(Str font_data, uint32_t pixel_height, bool sdf);
-extern Glyph font_get_glyph(Font font, uint32_t codepoint);
+extern Font font_init(Str font_path, u32 pixel_height, bool sdf);
+extern Font font_init_memory(Str font_data, u32 pixel_height, bool sdf);
+extern Glyph font_get_glyph(Font font, u32 codepoint);
 extern void font_free(Font font);

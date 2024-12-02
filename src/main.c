@@ -1,4 +1,5 @@
 #include "core.h"
+
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <time.h>
@@ -29,7 +30,7 @@ float get_time(void) {
     return ts.tv_sec + ts.tv_nsec/1e9;
 }
 
-void resize_cb(GLFWwindow* window, int width, int height) {
+void resize_cb(GLFWwindow* window, i32 width, i32 height) {
     (void) window;
     glViewport(0, 0, width, height);
 }
@@ -40,7 +41,7 @@ void render(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Renderable *r = ecs_query_iter_get_field(iter, 0);
     Transform *t = ecs_query_iter_get_field(iter, 1);
-    for (size_t i = 0; i < iter.count; i++) {
+    for (u32 i = 0; i < iter.count; i++) {
         renderer_draw_quad(renderer, t[i], r[i].texture, r[i].color);
     }
 }
@@ -49,6 +50,8 @@ int main(void) {
     ECS *ecs = ecs_new();
     ecs_register_component(ecs, Transform);
     ecs_register_component(ecs, Renderable);
+
+    offsetof(Transform, x);
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -67,8 +70,8 @@ int main(void) {
     Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), 32, false);
     // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), 24, false);
 
-    uint8_t *rgba = malloc(font.atlas.size.x*font.atlas.size.y*4);
-    for (int32_t i = 0; i < font.atlas.size.x*font.atlas.size.y; i++) {
+    u8 *rgba = malloc(font.atlas.size.x*font.atlas.size.y*4);
+    for (i32 i = 0; i < font.atlas.size.x*font.atlas.size.y; i++) {
         rgba[i*4 + 0] = 255;
         rgba[i*4 + 1] = 255;
         rgba[i*4 + 2] = 255;
@@ -89,7 +92,7 @@ int main(void) {
         glClearColor(color_arg(color_rgb_hex(0x000000)));
         glClear(GL_COLOR_BUFFER_BIT);
 
-        int width, height;
+        i32 width, height;
         glfwGetWindowSize(window, &width, &height);
         renderer_update(renderer, width, height);
         renderer_begin(renderer);
@@ -104,7 +107,7 @@ int main(void) {
             .y = font.ascent+font.descent,
         };
         pos = ivec2_add(pos, ivec2s(16));
-        for (size_t i = 0; i < string.len; i++) {
+        for (u64 i = 0; i < string.len; i++) {
             if (string.data[i] == '\n') {
                 pos.x = 16;
                 pos.y += font.line_gap;
