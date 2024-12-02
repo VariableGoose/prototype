@@ -81,33 +81,32 @@ i32 main(void) {
         renderer_update(renderer, width, height);
         renderer_begin(renderer);
 
-        // Texture atlas = font_get_atlas(&font, 32);
-        // renderer_draw_quad(renderer, (Quad) {
-        //         // .x = texture_get_size(renderer, atlas2).x, .y = 0,
-        //         .x = 0, .y = 0,
-        //         .w = texture_get_size(renderer, atlas).x,
-        //         .h = texture_get_size(renderer, atlas).y,
-        //     }, atlas, color_rgb_hex(0xffffff));
-        //
-        // Texture atlas2 = font_get_atlas(&font, 16);
-        // renderer_draw_quad(renderer, (Quad) {
-        //         .x = texture_get_size(renderer, atlas).x, .y = 0,
-        //         // .x = 0, .y = 0,
-        //         .w = texture_get_size(renderer, atlas2).x,
-        //         .h = texture_get_size(renderer, atlas2).y,
-        //     }, atlas2, color_rgb_hex(0xffffff));
-
-        const Str string = str_lit("Chapter 1");
+        const Str string = str_lit("uwu :3");
+        Ivec2 string_size = font_measure_string(&font, string, size);
         FontMetrics metrics = font_get_metrics(&font, size);
+
+        u32 baseline = metrics.ascent-metrics.descent;
+
         Ivec2 pos = {
-            .y = metrics.ascent + metrics.descent,
+            .y = baseline
         };
         pos = ivec2_add(pos, ivec2s(16));
+
+        renderer_draw_quad(renderer, (Quad) {
+                .x = 16, .y = baseline-metrics.ascent,
+                .w = string_size.x, .h = string_size.y,
+            }, TEXTURE_NULL, COLOR_RED);
+
         for (u64 i = 0; i < string.len; i++) {
+            if (string.data[i] == '\n') {
+                pos.x = 16;
+                pos.y += metrics.line_gap;
+                continue;
+            }
             Glyph glyph = font_get_glyph(&font, string.data[i], size);
             renderer_draw_quad_atlas(renderer, (Quad) {
                     .x = pos.x + glyph.offset.x,
-                    .y = pos.y - glyph.offset.y,
+                    .y = pos.y - glyph.offset.y + metrics.descent,
                     .w = glyph.size.x,
                     .h = glyph.size.y,
                 }, (TextureAtlas) {

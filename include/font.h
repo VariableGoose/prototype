@@ -35,9 +35,9 @@ typedef HashMap(u32, u32) GlyphMap;
 
 typedef struct FontMetrics FontMetrics;
 struct FontMetrics {
-    u32 descent;
-    u32 ascent;
-    u32 line_gap;
+    i32 descent;
+    i32 ascent;
+    i32 line_gap;
 };
 
 typedef struct RigidFont RigidFont;
@@ -72,4 +72,6 @@ extern void font_cache_size(Font *font, u32 size);
 extern Glyph font_get_glyph(Font *font, u32 codepoint, u32 size);
 extern Texture font_get_atlas(Font *font, u32 size);
 extern FontMetrics font_get_metrics(Font *font, u32 size);
+// This function ignores vertical space. New-line characters are treated as
+// unknown characters.
 extern Ivec2 font_measure_string(Font *font, Str str, u32 size);

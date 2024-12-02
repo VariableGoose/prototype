@@ -51,6 +51,12 @@ static inline Color color_rgb_hex(uint32_t hex) {
 
 #define color_arg(color) (color).r, (color).g, (color).b, (color).a
 
+#define COLOR_WHITE ((Color) {1.0f, 1.0f, 1.0f, 1.0f})
+#define COLOR_BLACK ((Color) {0.0f, 0.0f, 0.0f, 1.0f})
+#define COLOR_RED ((Color) {1.0f, 0.0f, 0.0f, 1.0f})
+#define COLOR_GREEN ((Color) {0.0f, 1.0f, 0.0f, 1.0f})
+#define COLOR_BLUE ((Color) {0.0f, 0.0f, 1.0f, 1.0f})
+
 // -- Renderer -----------------------------------------------------------------
 // Context containing everything neccessary to perform rendering.
 typedef struct Renderer Renderer;
@@ -73,6 +79,8 @@ struct Quad {
 };
 
 typedef uint32_t Texture;
+
+#define TEXTURE_NULL 0
 
 typedef struct TextureAtlas TextureAtlas;
 struct TextureAtlas {
