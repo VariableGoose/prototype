@@ -4,9 +4,7 @@
 #include "gfx.h"
 #include "str.h"
 
-#include <GLFW/glfw3.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <stdio.h>
 
 #include <ft2build.h>
@@ -76,6 +74,26 @@ static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_in
     vec_push(font_loose->glyphs, loose);
 }
 
+// static void extract_kerning(FontLoose *loose, FT_Face face) {
+//     for (u64 left = 0; left < vec_len(loose->glyphs); left++) {
+//         for (u64 right = 0; right < vec_len(loose->glyphs); right++) {
+//             FT_Vector kerning_vector;
+//             GlyphLoose left_glyph = loose->glyphs[left];
+//             GlyphLoose right_glyph = loose->glyphs[right];
+//             FT_Error err = FT_Get_Kerning(face, left_glyph.glyph_index, right_glyph.glyph_index, FT_KERNING_DEFAULT, &kerning_vector);
+//             if (err != 0) {
+//                 printf("Kerning ain't working cheif\n");
+//             }
+//             if (left_glyph.codepoint == 'A' && right_glyph.codepoint == 'V') {
+//                 printf("%c%c : (%ld, %ld)\n", left_glyph.codepoint, right_glyph.codepoint, kerning_vector.x >> 6, kerning_vector.y >> 6);
+//             }
+//             if (kerning_vector.x != 0 || kerning_vector.y != 0) {
+//                 printf("%c%c : (%ld, %ld)\n", left_glyph.codepoint, right_glyph.codepoint, kerning_vector.x >> 6, kerning_vector.y >> 6);
+//             }
+//         }
+//     }
+// }
+
 static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool sdf) {
     FT_Library lib;
     FT_Error err = FT_Init_FreeType(&lib);
@@ -116,6 +134,12 @@ static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool s
         process_glyph(&font_loose, face, glyph_index, codepoint, sdf);
         codepoint = FT_Get_Next_Char(face, codepoint, &glyph_index);
     }
+
+    // if (FT_HAS_KERNING(face)) {
+    //     extract_kerning(&font_loose, face);
+    // } else {
+    //     printf("Typeface doesn't support kerning.\n");
+    // }
 
     FT_Done_Face(face);
     FT_Done_FreeType(lib);
@@ -220,6 +244,10 @@ static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
         }
     }
 
+    // char name[64] = {0};
+    // snprintf(name, 64, "atlas%d.png", rand());
+    // stbi_write_png(name, atlas_size.x, atlas_size.y, 4, atlas_data, atlas_size.x*4);
+
     Texture atlas = texture_new(renderer, (TextureDesc) {
             .width = atlas_size.x,
             .height = atlas_size.y,
@@ -284,7 +312,6 @@ void font_cache_size(Font *font, u32 size) {
     if (hash_map_getp(font->size_lookup, size) != NULL) {
         return;
     }
-    printf("Font size cached: %u\n", size);
 
     FontLoose loose = construct_loose_font(font->ttf_data, size, font->sdf);
     RigidFont rigid = bake_looes_font(loose, font->renderer);

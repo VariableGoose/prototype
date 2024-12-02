@@ -4,12 +4,12 @@
 // Standalone module wrapping some backend. Right now, it's Freetype but I
 // intend to implement a stb_truetype backend as well.
 //
+// Freetype2 doesn't seem to parse GPOS kerning. Since almost all modern
+// fonts use GPOS as their kerning data it's not worth supporting the feature
+// for such a small subset of fonts. At least for now.
+//
 
 // TODO: Support allocator interface.
-// TODO: Implement kerning support.
-
-#include <stdint.h>
-#include <stdbool.h>
 
 #include "linear_algebra.h"
 #include "ds.h"
