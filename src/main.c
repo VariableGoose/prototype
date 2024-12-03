@@ -67,10 +67,10 @@ i32 main(void) {
     Renderer *renderer = renderer_new(4096, ALLOCATOR_LIBC);
 
     u32 size = 64;
-    // Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
+    Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/Roboto/Roboto-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/soulside/SoulsideBetrayed-3lazX.ttf"), renderer, false, ALLOCATOR_LIBC);
-    Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
+    // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
 
     while (!glfwWindowShouldClose(window)) {
         glClearColor(color_arg(color_rgb_hex(0x000000)));
@@ -81,32 +81,34 @@ i32 main(void) {
         renderer_update(renderer, width, height);
         renderer_begin(renderer);
 
-        const Str string = str_lit("uwu :3");
+        // const Str string = str_lit("We live on a placid island of ignorance amidst black seas of infinity, and it was not meant we should voyage far.");
+        const Str string = str_lit("Femboys :3");
         Ivec2 string_size = font_measure_string(&font, string, size);
         FontMetrics metrics = font_get_metrics(&font, size);
 
-        u32 baseline = metrics.ascent-metrics.descent;
-
         Ivec2 pos = {
-            .y = baseline
+            .x = (width - string_size.x) / 2,
+            .y = (height - string_size.y) / 2,
         };
-        pos = ivec2_add(pos, ivec2s(16));
 
-        renderer_draw_quad(renderer, (Quad) {
-                .x = 16, .y = baseline-metrics.ascent,
-                .w = string_size.x, .h = string_size.y,
-            }, TEXTURE_NULL, COLOR_RED);
+        // Ivec2 padding = { 8, 8 };
+        // renderer_draw_quad(renderer, (Quad) {
+        //         .x = pos.x - padding.x, .y = pos.y - padding.y,
+        //         .w = string_size.x + padding.x * 2, .h = string_size.y + padding.y * 2,
+        //     }, TEXTURE_NULL, color_rgb_hex(0x253a5e));
 
+        // renderer_draw_quad(renderer, (Quad) {
+        //         .x = pos.x - padding.x/2, .y = pos.y + metrics.ascent,
+        //         .w = string_size.x + padding.x, .h = 1,
+        //     }, TEXTURE_NULL, color_rgb_hex(0x253a5e));
+
+        f32 hue = 180.0f*glfwGetTime();
         for (u64 i = 0; i < string.len; i++) {
-            if (string.data[i] == '\n') {
-                pos.x = 16;
-                pos.y += metrics.line_gap;
-                continue;
-            }
             Glyph glyph = font_get_glyph(&font, string.data[i], size);
+            f32 y_offset = sinf(rad(hue-20*i)/5)*10.0f;
             renderer_draw_quad_atlas(renderer, (Quad) {
                     .x = pos.x + glyph.offset.x,
-                    .y = pos.y - glyph.offset.y + metrics.descent,
+                    .y = pos.y - glyph.offset.y + metrics.ascent + y_offset,
                     .w = glyph.size.x,
                     .h = glyph.size.y,
                 }, (TextureAtlas) {
@@ -115,7 +117,7 @@ i32 main(void) {
                     .v0 = glyph.uv[0].y,
                     .u1 = glyph.uv[1].x,
                     .v1 = glyph.uv[1].y,
-                }, color_rgb_hex(0xffffff));
+                }, color_hsv(hue - 15*i, 0.85f, 1.0f));
             pos.x += glyph.advance;
         }
 

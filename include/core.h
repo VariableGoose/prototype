@@ -36,6 +36,10 @@ typedef u32 b32;
 #define max(A, B) ((A) > (B) ? (A) : (B))
 #define lerp(A, B, T) ((A) + ((B) - (A)) * (T))
 
+#define PI 3.14159265359f
+#define rad(DEG) ((DEG)/(2*PI))
+#define deg(RAD) ((2*(RAD)/PI)
+
 typedef struct Allocator Allocator;
 struct Allocator {
     void *(*alloc)(u64 size, void *ctx);

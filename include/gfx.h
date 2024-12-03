@@ -2,7 +2,9 @@
 
 #include "core.h"
 #include "linear_algebra.h"
+#include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef void (*GlFunc)(void);
 typedef GlFunc (*GlLoadFunc)(const char *func_name);
@@ -47,6 +49,44 @@ static inline Color color_rgb_hex(uint32_t hex) {
         .b = (float) (hex >> 8 * 0 & 0xff) / 0xff,
         .a = 1.0f,
     };
+}
+
+static inline Color color_hsl(f32 hue, f32 saturation, f32 lightness) {
+    // https://en.wikipedia.org/wiki/HSL_and_HSV#HSL_to_RGB
+    Color color = {0};
+    f32 chroma = (1 - fabsf(2 * lightness - 1)) * saturation;
+    f32 hue_prime = fabsf(fmodf(hue, 360.0f)) / 60.0f;
+    f32 x = chroma * (1.0f - fabsf(fmodf(hue_prime, 2.0f) - 1.0f));
+    if (hue_prime < 1.0f) { color = (Color) { chroma, x, 0.0f, 1.0f, }; }
+    else if (hue_prime < 2.0f) { color = (Color) { x, chroma, 0.0f, 1.0f, }; }
+    else if (hue_prime < 3.0f) { color = (Color) { 0.0f, chroma, x, 1.0f, }; }
+    else if (hue_prime < 4.0f) { color = (Color) { 0.0f, x, chroma, 1.0f, }; }
+    else if (hue_prime < 5.0f) { color = (Color) { x, 0.0f, chroma, 1.0f, }; }
+    else if (hue_prime < 6.0f) { color = (Color) { chroma, 0.0f, x, 1.0f, }; }
+    f32 m = lightness-chroma / 2.0f;
+    color.r += m;
+    color.g += m;
+    color.b += m;
+    return color;
+}
+
+static inline Color color_hsv(f32 hue, f32 saturation, f32 value) {
+    // https://en.wikipedia.org/wiki/HSL_and_HSV#HSV_to_RGB
+    Color color = {0};
+    f32 chroma = value * saturation;
+    f32 hue_prime = fabsf(fmodf(hue, 360.0f)) / 60.0f;
+    f32 x = chroma * (1.0f - fabsf(fmodf(hue_prime, 2.0f) - 1.0f));
+    if (hue_prime < 1.0f) { color = (Color) { chroma, x, 0.0f, 1.0f, }; }
+    else if (hue_prime < 2.0f) { color = (Color) { x, chroma, 0.0f, 1.0f, }; }
+    else if (hue_prime < 3.0f) { color = (Color) { 0.0f, chroma, x, 1.0f, }; }
+    else if (hue_prime < 4.0f) { color = (Color) { 0.0f, x, chroma, 1.0f, }; }
+    else if (hue_prime < 5.0f) { color = (Color) { x, 0.0f, chroma, 1.0f, }; }
+    else if (hue_prime < 6.0f) { color = (Color) { chroma, 0.0f, x, 1.0f, }; }
+    f32 m = value - chroma;
+    color.r += m;
+    color.g += m;
+    color.b += m;
+    return color;
 }
 
 #define color_arg(color) (color).r, (color).g, (color).b, (color).a
