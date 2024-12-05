@@ -40,10 +40,7 @@ struct BatchRenderer {
     Texture textures[32];
     uint32_t curr_texture;
 
-    struct {
-        uint32_t width;
-        uint32_t height;
-    } screen;
+    Camera camera;
 };
 
 struct Renderer {

@@ -9,17 +9,22 @@ out vec2 f_uv;
 out vec4 f_color;
 flat out uint f_texture_index;
 
-uniform ivec2 screen_size;
+struct Camera {
+    ivec2 screen_size;
+    vec2 pos;
+    float zoom;
+    vec2 dir;
+};
+uniform Camera cam;
 
 void main() {
     f_uv = uv;
     f_color = color;
     f_texture_index = texture_index;
 
-    vec2 half_screen = screen_size/2.0;
     vec2 screen_pos = pos;
-    screen_pos -= vec2(half_screen.x, half_screen.y);
-    screen_pos.y = -screen_pos.y;
-    screen_pos /= half_screen;
+    screen_pos -= cam.pos*cam.dir;
+    float aspect = float(cam.screen_size.x)/float(cam.screen_size.y);
+    screen_pos /= vec2(aspect*cam.zoom, cam.zoom)/2;
     gl_Position = vec4(screen_pos, 0.0, 1.0);
 }

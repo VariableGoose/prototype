@@ -140,12 +140,8 @@ static void br_free(BatchRenderer br) {
     br.allocator.free(br.verts, br.max_batch_size*4*sizeof(BrVertex), br.allocator.ctx);
 }
 
-static void br_update(BatchRenderer *br, uint32_t screen_width, uint32_t screen_height) {
-    br->screen.width = screen_width;
-    br->screen.height = screen_height;
-}
-
-static void br_begin(BatchRenderer *br) {
+static void br_begin(BatchRenderer *br, Camera camera) {
+    br->camera = camera;
     br->curr_quad = 0;
     br->curr_texture = 0;
 }
@@ -163,8 +159,10 @@ static void br_submit(BatchRenderer *br) {
         glBindTexture(GL_TEXTURE_2D, br->textures[i]);
     }
 
-    uint32_t uniform_location = glGetUniformLocation(br->shader, "screen_size");
-    glUniform2iv(uniform_location, 1, (int *) &br->screen.width);
+    glUniform2iv(glGetUniformLocation(br->shader, "cam.screen_size"), 1, &br->camera.screen_size.x);
+    glUniform1f(glGetUniformLocation(br->shader, "cam.zoom"), br->camera.zoom);
+    glUniform2fv(glGetUniformLocation(br->shader, "cam.pos"), 1, &br->camera.position.x);
+    glUniform2fv(glGetUniformLocation(br->shader, "cam.dir"), 1, &br->camera.direction.x);
 
     glBindVertexArray(br->vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, br->ibo);
@@ -176,11 +174,11 @@ static void br_submit(BatchRenderer *br) {
     glUseProgram(0);
 }
 
-static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atlas, Color color) {
+static void br_draw_quad(BatchRenderer *br, Quad quad, Vec2 origin, TextureAtlasInternal atlas, Color color) {
     if (br->curr_quad == br->max_batch_size || br->curr_texture == 32) {
         br_end(br);
         br_submit(br);
-        br_begin(br);
+        br_begin(br, br->camera);
     }
 
     uint32_t texture_index = 0;
@@ -207,20 +205,19 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, TextureAtlasInternal atla
     };
 
     const Vec2 pos[4] = {
-        vec2(0.0f, 1.0f),
-        vec2(1.0f, 1.0f),
-        vec2(0.0f, 0.0f),
-        vec2(1.0f, 0.0f),
+        vec2(-0.5f, -0.5f),
+        vec2( 0.5f, -0.5f),
+        vec2(-0.5f,  0.5f),
+        vec2( 0.5f,  0.5f),
     };
 
     for (uint8_t i = 0; i < 4; i++) {
         BrVertex *vert = &br->verts[br->curr_quad*4+i];
 
         vert->pos = pos[i];
-        vert->pos.x *= quad.w;
-        vert->pos.y *= quad.h;
-        vert->pos.x += quad.x;
-        vert->pos.y += quad.y;
+        vert->pos = vec2_sub(vert->pos, vec2_divs(vec2_mul(origin, br->camera.direction), 2.0f));
+        vert->pos = vec2_mul(vert->pos, quad.size);
+        vert->pos = vec2_add(vert->pos, vec2_mul(quad.pos, br->camera.direction));
 
         vert->uv = uvs[i];
         vert->color = color;
@@ -261,12 +258,8 @@ void renderer_free(Renderer *renderer) {
     renderer->allocator.free(renderer, sizeof(*renderer), renderer->allocator.ctx);
 }
 
-void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height) {
-    br_update(&renderer->br, screen_width, screen_height);
-}
-
-void renderer_begin(Renderer *renderer) {
-    br_begin(&renderer->br);
+void renderer_begin(Renderer *renderer, Camera camera) {
+    br_begin(&renderer->br, camera);
 }
 
 void renderer_end(Renderer *renderer) {
@@ -277,9 +270,10 @@ void renderer_submit(Renderer *renderer) {
     br_submit(&renderer->br);
 }
 
-void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color color) {
+void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color) {
     br_draw_quad(&renderer->br,
             quad,
+            origin,
             (TextureAtlasInternal) {
                 renderer->textures[texture].id,
                 0, 0,
@@ -288,9 +282,10 @@ void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color co
             color);
 }
 
-void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color) {
+void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color) {
     br_draw_quad(&renderer->br,
             quad,
+            origin,
             (TextureAtlasInternal) {
                 .id = renderer->textures[atlas.atlas].id,
                 .u0 = atlas.u0,
@@ -306,11 +301,12 @@ void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, 
     for (u64 i = 0; i < string.len; i++) {
         Glyph glyph = font_get_glyph(font, string.data[i], size);
         renderer_draw_quad_atlas(renderer, (Quad) {
-                .x = position.x + glyph.offset.x,
-                .y = position.y - glyph.offset.y + metrics.ascent,
-                .w = glyph.size.x,
-                .h = glyph.size.y,
-            }, (TextureAtlas) {
+                .pos = {
+                    .x = position.x + glyph.offset.x,
+                    .y = position.y - glyph.offset.y + metrics.ascent,
+                },
+                .size = vec2(vec2_arg(glyph.size)),
+            }, vec2(-1.0f, -1.0f), (TextureAtlas) {
                 .atlas = font_get_atlas(font, size),
                 .u0 = glyph.uv[0].x,
                 .v0 = glyph.uv[0].y,

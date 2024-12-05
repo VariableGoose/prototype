@@ -40,7 +40,7 @@ void render(ECS *ecs, QueryIter iter, void *user_ptr) {
     Renderable *r = ecs_query_iter_get_field(iter, 0);
     Transform *t = ecs_query_iter_get_field(iter, 1);
     for (u32 i = 0; i < iter.count; i++) {
-        renderer_draw_quad(renderer, t[i], r[i].texture, r[i].color);
+        renderer_draw_quad(renderer, t[i], vec2s(0.0f), r[i].texture, r[i].color);
     }
 }
 
@@ -48,8 +48,6 @@ i32 main(void) {
     ECS *ecs = ecs_new();
     ecs_register_component(ecs, Transform);
     ecs_register_component(ecs, Renderable);
-
-    offsetof(Transform, x);
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -75,10 +73,40 @@ i32 main(void) {
         glClearColor(color_arg(color_rgb_hex(0x000000)));
         glClear(GL_COLOR_BUFFER_BIT);
 
-        i32 width, height;
-        glfwGetWindowSize(window, &width, &height);
-        renderer_update(renderer, width, height);
-        renderer_begin(renderer);
+        Ivec2 screen_size;
+        glfwGetWindowSize(window, &screen_size.x, &screen_size.y);
+
+        // Game pass
+        renderer_begin(renderer, (Camera) {
+                .screen_size = screen_size,
+                .zoom = 15.0f,
+                .position = vec2(0.0f, 0.0f),
+                .direction = vec2(1.0f, 1.0f),
+            });
+
+        renderer_draw_quad(renderer, (Quad) {
+                .pos = vec2(0.0f, 0.0f),
+                .size = vec2(1.0f, 1.0f),
+            }, vec2(0.0f, 0.0f), TEXTURE_NULL, COLOR_WHITE);
+
+        // ecs_run_system(ecs, render, (QueryDesc) {
+        //         .user_ptr = renderer, 
+        //         .fields = {
+        //             [0] = ecs_id(ecs, Renderable),
+        //             [1] = ecs_id(ecs, Transform),
+        //         },
+        //     });
+
+        renderer_end(renderer);
+        renderer_submit(renderer);
+
+        // UI pass
+        renderer_begin(renderer, (Camera) {
+                .screen_size = screen_size,
+                .zoom = screen_size.y,
+                .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
+                .direction = vec2(1.0f, -1.0f),
+            });
 
         {
             Ivec2 pos = ivec2s(16);
@@ -94,32 +122,17 @@ i32 main(void) {
         Ivec2 string_size = font_measure_string(font, string, size);
         FontMetrics metrics = font_get_metrics(font, size);
 
-        Ivec2 pos = {
-            .x = (width - string_size.x) / 2,
-            .y = (height - string_size.y) / 2,
-        };
-
-        // Ivec2 padding = { 8, 8 };
-        // renderer_draw_quad(renderer, (Quad) {
-        //         .x = pos.x - padding.x, .y = pos.y - padding.y,
-        //         .w = string_size.x + padding.x * 2, .h = string_size.y + padding.y * 2,
-        //     }, TEXTURE_NULL, color_rgb_hex(0x253a5e));
-
-        // renderer_draw_quad(renderer, (Quad) {
-        //         .x = pos.x - padding.x/2, .y = pos.y + metrics.ascent,
-        //         .w = string_size.x + padding.x, .h = 1,
-        //     }, TEXTURE_NULL, color_rgb_hex(0x253a5e));
+        Ivec2 pos = ivec2_divs(ivec2_sub(screen_size, string_size), 2);
 
         f32 hue = 180.0f*glfwGetTime();
         for (u64 i = 0; i < string.len; i++) {
             Glyph glyph = font_get_glyph(font, string.data[i], size);
             f32 y_offset = sinf(rad(hue-20*i)/5)*10.0f;
             renderer_draw_quad_atlas(renderer, (Quad) {
-                    .x = pos.x + glyph.offset.x,
-                    .y = pos.y - glyph.offset.y + metrics.ascent + y_offset,
-                    .w = glyph.size.x,
-                    .h = glyph.size.y,
-                }, (TextureAtlas) {
+                    .pos.x = pos.x + glyph.offset.x,
+                    .pos.y = pos.y - glyph.offset.y + metrics.ascent + y_offset,
+                    .size = vec2(vec2_arg(glyph.size)),
+                }, vec2(-1.0f, -1.0f), (TextureAtlas) {
                     .atlas = font_get_atlas(font, size),
                     .u0 = glyph.uv[0].x,
                     .v0 = glyph.uv[0].y,
@@ -128,14 +141,6 @@ i32 main(void) {
                 }, color_hsv(hue - 15*i, 0.85f, 1.0f));
             pos.x += glyph.advance;
         }
-
-        // ecs_run_system(ecs, render, (QueryDesc) {
-        //         .user_ptr = renderer, 
-        //         .fields = {
-        //             [0] = ecs_id(ecs, Renderable),
-        //             [1] = ecs_id(ecs, Transform),
-        //         },
-        //     });
 
         renderer_end(renderer);
         renderer_submit(renderer);

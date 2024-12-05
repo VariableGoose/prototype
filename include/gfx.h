@@ -101,27 +101,33 @@ static inline Color color_hsv(f32 hue, f32 saturation, f32 value) {
 // Context containing everything neccessary to perform rendering.
 typedef struct Renderer Renderer;
 
+typedef struct Camera Camera;
+struct Camera {
+    Ivec2 screen_size;
+    f32 zoom;
+    Vec2 position;
+    // Which direction is right and up.
+    Vec2 direction;
+};
+
 extern Renderer *renderer_new(uint32_t max_batch_size, Allocator allocator);
 // This function still needs to be called even if renderer was created with a
 // lifetime based allocator becaues it also cleans up OpenGL resources, not
 // only memory.
 extern void renderer_free(Renderer *renderer);
 
-extern void renderer_update(Renderer *renderer, uint32_t screen_width, uint32_t screen_height);
-extern void renderer_begin(Renderer *renderer);
+extern void renderer_begin(Renderer *renderer, Camera camera);
 extern void renderer_end(Renderer *renderer);
 extern void renderer_submit(Renderer *renderer);
 
 typedef struct Quad Quad;
 struct Quad {
-    int x, y;
-    int w, h;
+    Vec2 pos;
+    Vec2 size;
 };
 
 typedef uint32_t Texture;
 typedef struct Font Font;
-
-#define TEXTURE_NULL 0
 
 typedef struct TextureAtlas TextureAtlas;
 struct TextureAtlas {
@@ -134,8 +140,8 @@ struct TextureAtlas {
 
 // Draws a quad onto the screen using screen coordinates.
 // Origin in the top left corner.
-extern void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color color);
-extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color);
+extern void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color);
+extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color);
 
 extern void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Ivec2 position, Color color);
 
@@ -213,6 +219,8 @@ struct TextureDesc {
     const void *pixels;
     TextureSampler sampler;
 };
+
+#define TEXTURE_NULL 0
 
 extern Texture texture_new(Renderer *renderer, TextureDesc desc);
 extern Ivec2 texture_get_size(const Renderer *renderer, Texture texture);
