@@ -1,4 +1,3 @@
-#include "font.h"
 #include "core.h"
 #include "ds.h"
 #include "gfx.h"
@@ -34,6 +33,31 @@ struct FontLoose {
     uint32_t pixel_size;
 
     FontMetrics metrics;
+};
+
+typedef HashMap(u32, u32) GlyphMap;
+
+typedef struct RigidFont RigidFont;
+struct RigidFont {
+    u32 size;
+
+    Glyph *glyphs;
+    FontMetrics metrics;
+
+    // Codepoint to glyph map
+    // Key:   u32 (codepoint)
+    // Value: u32 (glyph index)
+    GlyphMap glyph_map;
+
+    Texture atlas;
+};
+
+struct Font {
+    Allocator allocator;
+    Renderer *renderer;
+    Str ttf_data;
+    b8 sdf;
+    HashMap(u32, RigidFont) size_lookup;
 };
 
 static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_index, uint32_t codepoint, bool sdf) {
@@ -270,12 +294,13 @@ static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
     };
 }
 
-Font font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator) {
+Font *font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator) {
     // TODO: Replace this with some type of scratch/temporary allocator.
     char *cstr_font_path = malloc(font_path.len + 1);
     memcpy(cstr_font_path, font_path.data, font_path.len);
     cstr_font_path[font_path.len] = 0;
-    Font font = {
+    Font *font = allocator.alloc(sizeof(Font), allocator.ctx);
+    *font = (Font) {
         .allocator = allocator,
         .renderer = renderer,
         .ttf_data = read_file(cstr_font_path, allocator),
@@ -286,8 +311,9 @@ Font font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator) {
     return font;
 }
 
-Font font_init_memory(Str font_data, Renderer *renderer, b8 sdf, Allocator allocator) {
-    Font font = {
+Font *font_init_memory(Str font_data, Renderer *renderer, b8 sdf, Allocator allocator) {
+    Font *font = allocator.alloc(sizeof(Font), allocator.ctx);
+    *font = (Font) {
         .allocator = allocator,
         .renderer = renderer,
         .ttf_data = str_copy(font_data, allocator),

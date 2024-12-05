@@ -9,7 +9,6 @@
 
 #include "ecs.h"
 #include "gfx.h"
-#include "font.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -67,7 +66,7 @@ i32 main(void) {
     Renderer *renderer = renderer_new(4096, ALLOCATOR_LIBC);
 
     u32 size = 64;
-    Font font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
+    Font *font = font_init(str_lit("assets/fonts/Spline_Sans/static/SplineSans-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/Roboto/Roboto-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/soulside/SoulsideBetrayed-3lazX.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
@@ -81,10 +80,19 @@ i32 main(void) {
         renderer_update(renderer, width, height);
         renderer_begin(renderer);
 
+        {
+            Ivec2 pos = ivec2s(16);
+            renderer_draw_string(renderer, str_lit("Big Red"), font, 64, pos, COLOR_RED);
+            pos.y += font_get_metrics(font, 64).line_gap;
+            renderer_draw_string(renderer, str_lit("Medium Blue"), font, 32, pos, COLOR_BLUE);
+            pos.y += font_get_metrics(font, 32).line_gap;
+            renderer_draw_string(renderer, str_lit("Small green"), font, 16, pos, COLOR_GREEN);
+        }
+
         // const Str string = str_lit("We live on a placid island of ignorance amidst black seas of infinity, and it was not meant we should voyage far.");
         const Str string = str_lit("Femboys :3");
-        Ivec2 string_size = font_measure_string(&font, string, size);
-        FontMetrics metrics = font_get_metrics(&font, size);
+        Ivec2 string_size = font_measure_string(font, string, size);
+        FontMetrics metrics = font_get_metrics(font, size);
 
         Ivec2 pos = {
             .x = (width - string_size.x) / 2,
@@ -104,7 +112,7 @@ i32 main(void) {
 
         f32 hue = 180.0f*glfwGetTime();
         for (u64 i = 0; i < string.len; i++) {
-            Glyph glyph = font_get_glyph(&font, string.data[i], size);
+            Glyph glyph = font_get_glyph(font, string.data[i], size);
             f32 y_offset = sinf(rad(hue-20*i)/5)*10.0f;
             renderer_draw_quad_atlas(renderer, (Quad) {
                     .x = pos.x + glyph.offset.x,
@@ -112,7 +120,7 @@ i32 main(void) {
                     .w = glyph.size.x,
                     .h = glyph.size.y,
                 }, (TextureAtlas) {
-                    .atlas = font_get_atlas(&font, size),
+                    .atlas = font_get_atlas(font, size),
                     .u0 = glyph.uv[0].x,
                     .v0 = glyph.uv[0].y,
                     .u1 = glyph.uv[1].x,
@@ -136,7 +144,7 @@ i32 main(void) {
         glfwPollEvents();
     }
 
-    font_free(&font);
+    font_free(font);
 
     renderer_free(renderer);
 

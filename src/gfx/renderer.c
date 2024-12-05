@@ -300,3 +300,23 @@ void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas,
             },
             color);
 }
+
+void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Ivec2 position, Color color) {
+    FontMetrics metrics = font_get_metrics(font, size);
+    for (u64 i = 0; i < string.len; i++) {
+        Glyph glyph = font_get_glyph(font, string.data[i], size);
+        renderer_draw_quad_atlas(renderer, (Quad) {
+                .x = position.x + glyph.offset.x,
+                .y = position.y - glyph.offset.y + metrics.ascent,
+                .w = glyph.size.x,
+                .h = glyph.size.y,
+            }, (TextureAtlas) {
+                .atlas = font_get_atlas(font, size),
+                .u0 = glyph.uv[0].x,
+                .v0 = glyph.uv[0].y,
+                .u1 = glyph.uv[1].x,
+                .v1 = glyph.uv[1].y,
+            }, color);
+        position.x += glyph.advance;
+    }
+}

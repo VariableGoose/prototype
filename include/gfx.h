@@ -4,7 +4,7 @@
 #include "linear_algebra.h"
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include "str.h"
 
 typedef void (*GlFunc)(void);
 typedef GlFunc (*GlLoadFunc)(const char *func_name);
@@ -119,6 +119,7 @@ struct Quad {
 };
 
 typedef uint32_t Texture;
+typedef struct Font Font;
 
 #define TEXTURE_NULL 0
 
@@ -135,6 +136,47 @@ struct TextureAtlas {
 // Origin in the top left corner.
 extern void renderer_draw_quad(Renderer *renderer, Quad quad, Texture texture, Color color);
 extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, TextureAtlas atlas, Color color);
+
+extern void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Ivec2 position, Color color);
+
+// -- Font ---------------------------------------------------------------------
+// Freetype2 doesn't seem to parse GPOS kerning. Since almost all modern
+// fonts use GPOS as their kerning data it's not worth supporting the feature
+// for such a small subset of fonts. At least for now.
+
+typedef struct Glyph Glyph;
+struct Glyph {
+    u32 advance;
+    Ivec2 size;
+    Ivec2 offset;
+
+    u32 codepoint;
+    u32 glyph_index;
+
+    // Normalized UV coordinates.
+    // [0] = Top left
+    // [1] = Bottom right
+    Vec2 uv[2];
+};
+
+typedef struct FontMetrics FontMetrics;
+struct FontMetrics {
+    i32 descent;
+    i32 ascent;
+    i32 line_gap;
+};
+
+extern Font *font_init(Str font_path, Renderer *renderer, b8 sdf, Allocator allocator);
+extern Font *font_init_memory(Str font_data, Renderer *renderer, b8 sdf, Allocator allocator);
+extern void font_free(Font *font);
+extern void font_cache_size(Font *font, u32 size);
+
+extern Glyph font_get_glyph(Font *font, u32 codepoint, u32 size);
+extern Texture font_get_atlas(Font *font, u32 size);
+extern FontMetrics font_get_metrics(Font *font, u32 size);
+// This function ignores vertical space. New-line characters are treated as
+// unknown characters.
+extern Ivec2 font_measure_string(Font *font, Str str, u32 size);
 
 // -- Texture ------------------------------------------------------------------
 typedef enum {
