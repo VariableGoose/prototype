@@ -139,7 +139,16 @@ struct TextureAtlas {
 };
 
 // Draws a quad onto the screen using screen coordinates.
-// Origin in the top left corner.
+// The origin looks like this when the direction of the camera is (1, 1).
+// (-1,  1) - (1,  1)
+// |                |
+// |                |
+// |                |
+// |      (0, 0)    |
+// |                |
+// |                |
+// |                |
+// (-1, -1) - (1, -1)
 extern void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color);
 extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color);
 
