@@ -8,7 +8,7 @@
 typedef struct TextureInternal TextureInternal;
 struct TextureInternal {
     // OpenGL texture ID
-    uint32_t id;
+    u32 id;
 
     Ivec2 size;
 };
@@ -18,7 +18,7 @@ struct BrVertex {
     Vec2 pos;
     Vec2 uv;
     Color color;
-    uint32_t texture_index;
+    u32 texture_index;
 };
 
 typedef struct BatchRenderer BatchRenderer;
@@ -26,19 +26,19 @@ struct BatchRenderer {
     Allocator allocator;
 
     // Vertex array
-    uint32_t vao;
+    u32 vao;
     // Vertex buffer
-    uint32_t vbo;
+    u32 vbo;
     // Index buffer
-    uint32_t ibo;
-    uint32_t shader;
+    u32 ibo;
+    u32 shader;
 
-    uint32_t max_batch_size;
+    u32 max_batch_size;
     BrVertex *verts;
-    uint32_t curr_quad;
+    u32 curr_quad;
 
     Texture textures[32];
-    uint32_t curr_texture;
+    u32 curr_texture;
 
     Camera camera;
 };

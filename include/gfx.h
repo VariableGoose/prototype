@@ -3,7 +3,6 @@
 #include "core.h"
 #include "linear_algebra.h"
 #include <math.h>
-#include <stdint.h>
 #include "str.h"
 
 typedef void (*GlFunc)(void);
@@ -14,39 +13,39 @@ extern void gfx_init(GlLoadFunc gl_load_func);
 // -- Color --------------------------------------------------------------------
 typedef struct Color Color;
 struct Color {
-    float r, g, b, a;
+    f32 r, g, b, a;
 };
 
-static inline Color color_rgba_f(float r, float g, float b, float a) {
+static inline Color color_rgba_f(f32 r, f32 g, f32 b, f32 a) {
     return (Color) {r, g, b, a};
 }
 
-static inline Color color_rgba_i(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+static inline Color color_rgba_i(u8 r, u8 g, u8 b, u8 a) {
     return (Color) {r/255.0f, g/255.0f, b/255.0f, a/255.0f};
 }
 
-static inline Color color_rgba_hex(uint32_t hex) {
+static inline Color color_rgba_hex(u32 hex) {
     return (Color) {
-        .r = (float) (hex >> 8 * 3 & 0xff) / 0xff,
-        .g = (float) (hex >> 8 * 2 & 0xff) / 0xff,
-        .b = (float) (hex >> 8 * 1 & 0xff) / 0xff,
-        .a = (float) (hex >> 8 * 0 & 0xff) / 0xff,
+        .r = (f32) (hex >> 8 * 3 & 0xff) / 0xff,
+        .g = (f32) (hex >> 8 * 2 & 0xff) / 0xff,
+        .b = (f32) (hex >> 8 * 1 & 0xff) / 0xff,
+        .a = (f32) (hex >> 8 * 0 & 0xff) / 0xff,
     };
 }
 
-static inline Color color_rgb_f(float r, float g, float b) {
+static inline Color color_rgb_f(f32 r, f32 g, f32 b) {
     return (Color) {r, g, b, 1.0f};
 }
 
-static inline Color color_rgb_i(uint8_t r, uint8_t g, uint8_t b) {
+static inline Color color_rgb_i(u8 r, u8 g, u8 b) {
     return (Color) {r/255.0f, g/255.0f, b/255.0f, 1.0f};
 }
 
-static inline Color color_rgb_hex(uint32_t hex) {
+static inline Color color_rgb_hex(u32 hex) {
     return (Color) {
-        .r = (float) (hex >> 8 * 2 & 0xff) / 0xff,
-        .g = (float) (hex >> 8 * 1 & 0xff) / 0xff,
-        .b = (float) (hex >> 8 * 0 & 0xff) / 0xff,
+        .r = (f32) (hex >> 8 * 2 & 0xff) / 0xff,
+        .g = (f32) (hex >> 8 * 1 & 0xff) / 0xff,
+        .b = (f32) (hex >> 8 * 0 & 0xff) / 0xff,
         .a = 1.0f,
     };
 }
@@ -110,7 +109,7 @@ struct Camera {
     Vec2 direction;
 };
 
-extern Renderer *renderer_new(uint32_t max_batch_size, Allocator allocator);
+extern Renderer *renderer_new(u32 max_batch_size, Allocator allocator);
 // This function still needs to be called even if renderer was created with a
 // lifetime based allocator becaues it also cleans up OpenGL resources, not
 // only memory.
@@ -126,16 +125,16 @@ struct Quad {
     Vec2 size;
 };
 
-typedef uint32_t Texture;
+typedef u32 Texture;
 typedef struct Font Font;
 
 typedef struct TextureAtlas TextureAtlas;
 struct TextureAtlas {
     Texture atlas;
     // Top left
-    float u0, v0;
+    f32 u0, v0;
     // Bottom left
-    float u1, v1;
+    f32 u1, v1;
 };
 
 // Draws a quad onto the screen using screen coordinates.
@@ -152,6 +151,13 @@ struct TextureAtlas {
 extern void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color);
 extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color);
 
+// Made to be used during a pass with a camera configured to screen space.
+// (Camera) {
+//     .screen_size = screen_size,
+//     .zoom = screen_size.y,
+//     .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
+//     .direction = vec2(1.0f, -1.0f),
+// }
 extern void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Ivec2 position, Color color);
 
 // -- Font ---------------------------------------------------------------------
@@ -219,8 +225,8 @@ typedef enum {
 
 typedef struct TextureDesc TextureDesc;
 struct TextureDesc {
-    uint32_t width;
-    uint32_t height;
+    u32 width;
+    u32 height;
     TextureFormat format;
     TextureDataType data_type;
     // Pixels data with the origin beginning at the top left. The amount of

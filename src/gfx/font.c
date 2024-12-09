@@ -13,16 +13,16 @@ typedef struct GlyphLoose GlyphLoose;
 struct GlyphLoose {
     GlyphLoose *next;
 
-    uint32_t codepoint;
-    uint32_t glyph_index;
-    uint32_t advance;
+    u32 codepoint;
+    u32 glyph_index;
+    u32 advance;
 
     Ivec2 size;
     Ivec2 offset;
 
     struct {
         Ivec2 size;
-        uint8_t *buffer;
+        u8 *buffer;
     } bitmap;
 };
 
@@ -30,7 +30,7 @@ typedef struct FontLoose FontLoose;
 struct FontLoose {
     Vec(GlyphLoose) glyphs;
 
-    uint32_t pixel_size;
+    u32 pixel_size;
 
     FontMetrics metrics;
 };
@@ -60,7 +60,7 @@ struct Font {
     HashMap(u32, RigidFont) size_lookup;
 };
 
-static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_index, uint32_t codepoint, bool sdf) {
+static void process_glyph(FontLoose *font_loose, FT_Face face, u32 glyph_index, u32 codepoint, bool sdf) {
     FT_Error err = FT_Load_Glyph(face, glyph_index, FT_LOAD_DEFAULT);
     if (err) {
         printf("Some glyph error occured.");
@@ -78,7 +78,7 @@ static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_in
     FT_Glyph_Metrics metrics = face->glyph->metrics;
     FT_Bitmap bitmap = face->glyph->bitmap;
 
-    uint8_t *bitmap_copy = malloc(bitmap.width*bitmap.rows);
+    u8 *bitmap_copy = malloc(bitmap.width*bitmap.rows);
     memcpy(bitmap_copy, bitmap.buffer, bitmap.width*bitmap.rows);
 
     GlyphLoose loose = {
@@ -118,7 +118,7 @@ static void process_glyph(FontLoose *font_loose, FT_Face face, uint32_t glyph_in
 //     }
 // }
 
-static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool sdf) {
+static FontLoose construct_loose_font(Str font_data, u32 pixel_size, bool sdf) {
     FT_Library lib;
     FT_Error err = FT_Init_FreeType(&lib);
     if (err) {
@@ -149,8 +149,8 @@ static FontLoose construct_loose_font(Str font_data, uint32_t pixel_size, bool s
 
     // The 'missing glyph' glyph is always located at glyph index 0 within the font.
     // So load that first.
-    uint32_t glyph_index = 0;
-    uint32_t codepoint = 0;
+    u32 glyph_index = 0;
+    u32 codepoint = 0;
     process_glyph(&font_loose, face, glyph_index, codepoint, sdf);
 
     codepoint = FT_Get_First_Char(face, &glyph_index);
@@ -180,7 +180,7 @@ static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
     struct PackedGlyph {
         Ivec2 pos;
         Ivec2 size;
-        uint8_t *bitmap;
+        u8 *bitmap;
     };
 
     Vec(PackedGlyph) packed_list = NULL;
@@ -188,7 +188,7 @@ static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
     Ivec2 atlas_size = ivec2s(1);
     Ivec2 origin = ivec2s(0);
     Ivec2 pos = ivec2s(0);
-    int32_t row_height = 0;
+    i32 row_height = 0;
 
     for (size_t i = 0; i < vec_len(loose.glyphs); i++) {
         GlyphLoose curr = loose.glyphs[i];
@@ -254,12 +254,12 @@ static RigidFont bake_looes_font(FontLoose loose, Renderer *renderer) {
     }
 
     // Construct atlas bitmap.
-    uint8_t *atlas_data = malloc(atlas_size.x*atlas_size.y*4);
+    u8 *atlas_data = malloc(atlas_size.x*atlas_size.y*4);
     for (size_t i = 0; i < vec_len(packed_list); i++) {
         PackedGlyph packed = packed_list[i];
-        for (int32_t y = 0; y < packed.size.y; y++) {
-            for (int32_t x = 0; x < packed.size.x; x++) {
-                uint32_t index = packed.pos.x + x + (packed.pos.y + y) * atlas_size.x;
+        for (i32 y = 0; y < packed.size.y; y++) {
+            for (i32 x = 0; x < packed.size.x; x++) {
+                u32 index = packed.pos.x + x + (packed.pos.y + y) * atlas_size.x;
                 atlas_data[index*4+0] = 255;
                 atlas_data[index*4+1] = 255;
                 atlas_data[index*4+2] = 255;
