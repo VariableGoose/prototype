@@ -1,4 +1,5 @@
 #include "core.h"
+#include "window.h"
 
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
@@ -28,11 +29,6 @@ f32 get_time(void) {
     return ts.tv_sec + ts.tv_nsec/1e9;
 }
 
-void resize_cb(GLFWwindow* window, i32 width, i32 height) {
-    (void) window;
-    glViewport(0, 0, width, height);
-}
-
 void render(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
     Renderer *renderer = user_ptr;
@@ -49,15 +45,7 @@ i32 main(void) {
     ecs_register_component(ecs, Transform);
     ecs_register_component(ecs, Renderable);
 
-    glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_RESIZABLE, false);
-    GLFWwindow *window = glfwCreateWindow(800, 600, "Frame engine", NULL, NULL);
-    glfwSetFramebufferSizeCallback(window, resize_cb);
-    // glfwSwapInterval(0);
-    glfwMakeContextCurrent(window);
+    Window *window = window_new(800, 600, "Frame Engine", false, ALLOCATOR_LIBC);
 
     gfx_init(glfwGetProcAddress);
 
@@ -69,12 +57,11 @@ i32 main(void) {
     // Font font = font_init(str_lit("assets/fonts/soulside/SoulsideBetrayed-3lazX.ttf"), renderer, false, ALLOCATOR_LIBC);
     // Font font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), renderer, false, ALLOCATOR_LIBC);
 
-    while (!glfwWindowShouldClose(window)) {
+    while (window_is_open(window)) {
         glClearColor(color_arg(color_rgb_hex(0x000000)));
         glClear(GL_COLOR_BUFFER_BIT);
 
-        Ivec2 screen_size;
-        glfwGetWindowSize(window, &screen_size.x, &screen_size.y);
+        Ivec2 screen_size = window_get_size(window);
 
         // Game pass
         renderer_begin(renderer, (Camera) {
@@ -145,16 +132,15 @@ i32 main(void) {
         renderer_end(renderer);
         renderer_submit(renderer);
 
-        glfwSwapBuffers(window);
-        glfwPollEvents();
+        window_swap_buffers(window);
+        window_poll_event();
     }
 
     font_free(font);
 
     renderer_free(renderer);
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    window_free(window);
 
     ecs_free(ecs);
     return 0;

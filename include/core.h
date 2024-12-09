@@ -58,8 +58,3 @@ static const Allocator ALLOCATOR_LIBC = {
     .realloc = realloc_stub,
     .ctx = NULL,
 };
-
-// #define allocate(allocator, size) (allocator).alloc((size), (allocator).ctx)
-// #define allocate_struct(allocator, structure) (allocator).alloc(sizeof(structure), (allocator).ctx)
-// #define deallocate(allocator, ptr, size) (allocator).free((ptr), (size), (allocator).ctx)
-// #define reallocate(allocator, ptr, old, new) (allocator).realloc((ptr), (old), (new), (allocator).ctx)
