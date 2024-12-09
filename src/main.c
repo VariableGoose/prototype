@@ -3,6 +3,7 @@
 #include "core.h"
 #include "linear_algebra.h"
 #include "window.h"
+#include "ds.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -84,18 +85,12 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     }
 }
 
-void render_system(ECS *ecs, QueryIter iter, void *user_ptr) {
-    (void) ecs;
-    GameState *state = user_ptr;
-
-    Transform *transform = ecs_query_iter_get_field(iter, 0);
-    Renderable *renderable = ecs_query_iter_get_field(iter, 1);
-    for (u32 i = 0; i < iter.count; i++) {
-        renderer_draw_quad(state->renderer, (Quad) {
-                .pos = transform[i].pos,
-                .size = transform[i].size,
-            }, vec2s(0.0f), renderable[i].texture, renderable[i].color);
+void physics_step_body(GameState *state, Transform *transform, PhysicsBody *body, f32 dt) {
+    if (body->is_static) {
+        return;
     }
+    body->velocity.y += state->gravity*body->gravity_multiplier*state->dt_fixed;
+    transform->pos = vec2_add(transform->pos, vec2_muls(body->velocity, dt));
 }
 
 void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
@@ -105,10 +100,7 @@ void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     Transform *transform = ecs_query_iter_get_field(iter, 0);
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     for (u32 i = 0; i < iter.count; i++) {
-        // Gravity
-        body[i].velocity.y += state->gravity*body[i].gravity_multiplier*state->dt_fixed;
-
-        transform[i].pos = vec2_add(transform[i].pos, vec2_muls(body[i].velocity, state->dt_fixed));
+        physics_step_body(state, &transform[i], &body[i], state->dt_fixed);
     }
 
     // TODO: Implement spatial hashing and do collision detection/resolution
@@ -124,7 +116,7 @@ GameState game_state_new(void) {
         .ecs = ecs_new(),
         .window = window,
         .renderer = renderer_new(4096, ALLOCATOR_LIBC),
-        .dt_fixed = 1.0f / 144.0f,
+        .dt_fixed = 1.0f / 50.0f,
         .gravity = -9.82f,
     };
 }
@@ -166,9 +158,17 @@ void setup_ecs(GameState *state) {
         });
 }
 
+typedef struct PhysicsObject PhysicsObject;
+struct PhysicsObject {
+    Transform transform;
+    Renderable renderable;
+    PhysicsBody body;
+};
+
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
+    window_set_vsync(game_state.window, false);
 
     Entity player = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, player, Transform, {
@@ -200,6 +200,11 @@ i32 main(void) {
             .is_static = true,
         });
 
+    u32 fps = 0;
+    f32 fps_timer = 0.0f;
+
+    Vec(PhysicsObject) snapshot = NULL;
+
     f32 last_time_step = 0.0f;
     f32 last = glfwGetTime();
     while (window_is_open(game_state.window)) {
@@ -207,11 +212,41 @@ i32 main(void) {
         game_state.dt = curr - last;
         last = curr;
 
+        fps++;
+        fps_timer += game_state.dt;
+        if (fps_timer >= 1.0f) {
+            printf("FPS: %u\n", fps);
+            fps = 0;
+            fps_timer = 0.0f;
+        }
+
         // Game logic
         last_time_step += game_state.dt;
         for (u8 i = 0;
                 i < 10 && last_time_step >= game_state.dt_fixed;
                 i++, last_time_step -= game_state.dt_fixed) {
+            vec_free(snapshot);
+            Query query = ecs_query(game_state.ecs, (QueryDesc) {
+                    .fields = {
+                        ecs_id(game_state.ecs, Transform),
+                        ecs_id(game_state.ecs, Renderable),
+                        ecs_id(game_state.ecs, PhysicsBody),
+                    },
+                });
+            for (u32 i = 0; i < query.count; i++) {
+                QueryIter iter = ecs_query_get_iter(query, i);
+                Transform *transform = ecs_query_iter_get_field(iter, 0);
+                Renderable *renderable = ecs_query_iter_get_field(iter, 1);
+                PhysicsBody *body = ecs_query_iter_get_field(iter, 2);
+                for (u32 j = 0; j < iter.count; j++) {
+                    vec_push(snapshot, ((PhysicsObject) {
+                            .transform = transform[j],
+                            .renderable = renderable[j],
+                            .body = body[j],
+                        }));
+                }
+            }
+
             ecs_run_group(game_state.ecs, game_state.fixed_group);
         }
         ecs_run_group(game_state.ecs, game_state.free_group);
@@ -226,14 +261,14 @@ i32 main(void) {
                 .zoom = 25.0f,
             });
 
-        ecs_run_system(game_state.ecs, render_system, (QueryDesc) {
-                .user_ptr = &game_state,
-                .fields = {
-                    [0] = ecs_id(game_state.ecs, Transform),
-                    [1] = ecs_id(game_state.ecs, Renderable),
-                    QUERY_FIELDS_END,
-                },
-            });
+        for (u32 i = 0; i < vec_len(snapshot); i++) {
+            PhysicsObject obj = snapshot[i];
+            physics_step_body(&game_state, &obj.transform, &obj.body, last_time_step);
+            renderer_draw_quad(game_state.renderer, (Quad) {
+                    .pos = obj.transform.pos,
+                    .size = obj.transform.size,
+                }, vec2s(0.0f), obj.renderable.texture, obj.renderable.color);
+        }
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);

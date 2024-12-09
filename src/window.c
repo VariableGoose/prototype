@@ -60,7 +60,6 @@ Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Alloc
     glfwSetFramebufferSizeCallback(window->handle, resize_callback);
     glfwSetKeyCallback(window->handle, key_callback);
     glfwSetWindowUserPointer(window->handle, window);
-    // glfwSwapInterval(0);
     glfwMakeContextCurrent(window->handle);
 
     return window;
@@ -70,6 +69,11 @@ void window_free(Window *window) {
     glfwDestroyWindow(window->handle);
     glfwTerminate();
     window->allocator.free(window, sizeof(Window), window->allocator.ctx);
+}
+
+void window_set_vsync(Window *window, b8 vsync) {
+    (void) window;
+    glfwSwapInterval(vsync);
 }
 
 void window_poll_event(Window *window) {

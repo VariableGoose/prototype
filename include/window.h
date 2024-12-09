@@ -7,6 +7,7 @@ typedef struct Window Window;
 
 extern Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Allocator allocator);
 extern void window_free(Window *window);
+extern void window_set_vsync(Window *window, b8 vsync);
 
 extern void window_poll_event(Window *window);
 extern void window_swap_buffers(Window *window);
