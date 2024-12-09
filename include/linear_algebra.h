@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include <math.h>
 
 typedef struct Vec2 Vec2;
 struct Vec2 {
@@ -19,6 +20,27 @@ static inline Vec2 vec2_adds(Vec2 vec, f32 scaler) { return vec2(vec.x+scaler, v
 static inline Vec2 vec2_subs(Vec2 vec, f32 scaler) { return vec2(vec.x-scaler, vec.y-scaler); }
 static inline Vec2 vec2_muls(Vec2 vec, f32 scaler) { return vec2(vec.x*scaler, vec.y*scaler); }
 static inline Vec2 vec2_divs(Vec2 vec, f32 scaler) { return vec2(vec.x/scaler, vec.y/scaler); }
+
+static inline f32 vec2_magnitude_squared(Vec2 vec) {
+    return vec.x*vec.x+vec.y*vec.y;
+}
+
+static inline f32 vec2_magnitude(Vec2 vec) {
+    return sqrtf(vec.x*vec.x+vec.y*vec.y);
+}
+
+static inline Vec2 vec2_normalized(Vec2 vec) {
+    f32 mag = vec2_magnitude(vec);
+    if (mag == 0.0f) {
+        return vec2s(0.0f);
+    }
+    f32 inv_mag = 1.0f/mag;
+    return vec2_muls(vec, inv_mag);
+}
+
+static inline Vec2 vec2_lerp(Vec2 a, Vec2 b, f32 t) {
+    return vec2(lerp(a.x, b.x, t), lerp(a.y, b.y, t));
+}
 
 typedef struct Ivec2 Ivec2;
 struct Ivec2 {
