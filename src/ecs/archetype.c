@@ -37,12 +37,13 @@ Archetype *archetype_new(const ECS *ecs, Type type) {
         vec_push(archetype->storage, vec_new(ecs->components[type[i]].size));
         hash_map_insert(archetype->component_lookup, type[i], i);
 
-        HashSet(Archetype *) archetype_set = hash_map_get(ecs->component_archetype_set_map, type[i]);
+        HashSet(Archetype *) *archetype_set = hash_map_getp(ecs->component_archetype_set_map, type[i]);
         if (archetype_set == NULL) {
-            hash_set_insert(archetype_set, archetype);
-            hash_map_insert(ecs->component_archetype_set_map, type[i], archetype_set);
+            HashSet(Archetype *) new_archetype_set = NULL;
+            hash_set_insert(new_archetype_set, archetype);
+            hash_map_insert(ecs->component_archetype_set_map, type[i], new_archetype_set);
         } else {
-            hash_set_insert(archetype_set, archetype);
+            hash_set_insert(*archetype_set, archetype);
         }
     }
 

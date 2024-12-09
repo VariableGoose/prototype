@@ -148,4 +148,4 @@ extern KeyMod key_get_mods(const Window *window);
 extern b8 key_down(const Window *window, Key key);
 extern b8 key_up(const Window *window, Key key);
 extern b8 key_press(const Window *window, Key key);
-extern b8 key_relase(const Window *window, Key key);
+extern b8 key_release(const Window *window, Key key);

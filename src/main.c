@@ -17,6 +17,7 @@ struct GameState {
     Renderer *renderer;
     f32 dt;
     f32 dt_fixed;
+    f32 gravity;
 
     SystemGroup free_group;
     SystemGroup fixed_group;
@@ -41,26 +42,45 @@ struct Renderable {
     Texture texture;
 };
 
+typedef struct PhysicsBody PhysicsBody;
+struct PhysicsBody {
+    f32 gravity_multiplier;
+    Vec2 velocity;
+    b8 is_static;
+};
+
 // -----------------------------------------------------------------------------
 
 // -- Systems ------------------------------------------------------------------
+
+void template_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
+
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    for (u32 i = 0; i < iter.count; i++) {
+    }
+}
 
 void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
     GameState *state = user_ptr;
 
-    Transform *transform = ecs_query_iter_get_field(iter, 0);
-    PlayerController *controller = ecs_query_iter_get_field(iter, 1);
+    PlayerController *controller = ecs_query_iter_get_field(iter, 0);
+    PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     for (u32 i = 0; i < iter.count; i++) {
-        Vec2 velocity = vec2s(0.0f);
-        velocity.x -= key_down(state->window, KEY_A);
-        velocity.x += key_down(state->window, KEY_D);
-        velocity.y -= key_down(state->window, KEY_S);
-        velocity.y += key_down(state->window, KEY_W);
-        velocity = vec2_normalized(velocity);
-        velocity = vec2_muls(velocity, controller[i].speed*state->dt);
+        body[i].velocity.x = 0.0f;
+        body[i].velocity.x -= key_down(state->window, KEY_A);
+        body[i].velocity.x += key_down(state->window, KEY_D);
+        body[i].velocity.x *= controller[i].speed;
 
-        transform[i].pos = vec2_add(transform[i].pos, velocity);
+        if (key_press(state->window, KEY_SPACE)) {
+            body[i].velocity.y = 30.0f;
+        }
+
+        if (key_release(state->window, KEY_SPACE) && body[i].velocity.y > 0.0f) {
+            body[i].velocity.y /= 2.0f;
+        }
     }
 }
 
@@ -78,6 +98,23 @@ void render_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     }
 }
 
+void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
+
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+    for (u32 i = 0; i < iter.count; i++) {
+        // Gravity
+        body[i].velocity.y += state->gravity*body[i].gravity_multiplier*state->dt_fixed;
+
+        transform[i].pos = vec2_add(transform[i].pos, vec2_muls(body[i].velocity, state->dt_fixed));
+    }
+
+    // TODO: Implement spatial hashing and do collision detection/resolution
+    // with swept aabb.
+}
+
 // -----------------------------------------------------------------------------
 
 GameState game_state_new(void) {
@@ -87,7 +124,8 @@ GameState game_state_new(void) {
         .ecs = ecs_new(),
         .window = window,
         .renderer = renderer_new(4096, ALLOCATOR_LIBC),
-        .dt_fixed = 1.0f / 10.0f,
+        .dt_fixed = 1.0f / 144.0f,
+        .gravity = -9.82f,
     };
 }
 
@@ -107,12 +145,23 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, Transform);
     ecs_register_component(state->ecs, PlayerController);
     ecs_register_component(state->ecs, Renderable);
+    ecs_register_component(state->ecs, PhysicsBody);
 
     ecs_register_system(state->ecs, player_control_system, state->free_group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
+                [0] = ecs_id(state->ecs, PlayerController),
+                [1] = ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    ecs_register_system(state->ecs, physics_system, state->fixed_group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
                 [0] = ecs_id(state->ecs, Transform),
-                [1] = ecs_id(state->ecs, PlayerController),
+                [1] = ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
             },
         });
 }
@@ -130,8 +179,25 @@ i32 main(void) {
             .speed = 25.0f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
-            .color = COLOR_RED,
+            .color = COLOR_WHITE,
             .texture = TEXTURE_NULL,
+        });
+    entity_add_component(game_state.ecs, player, PhysicsBody, {
+            .gravity_multiplier = 10.0f,
+            .is_static = false,
+        });
+
+    Entity platform = ecs_entity(game_state.ecs);
+    entity_add_component(game_state.ecs, platform, Transform, {
+            .pos = vec2(0.0f, -10.0f),
+            .size = vec2(10.0f, 1.0f),
+        });
+    entity_add_component(game_state.ecs, platform, Renderable, {
+            .color = color_rgb_hex(0x212121),
+            .texture = TEXTURE_NULL,
+        });
+    entity_add_component(game_state.ecs, platform, PhysicsBody, {
+            .is_static = true,
         });
 
     f32 last_time_step = 0.0f;
@@ -165,6 +231,7 @@ i32 main(void) {
                 .fields = {
                     [0] = ecs_id(game_state.ecs, Transform),
                     [1] = ecs_id(game_state.ecs, Renderable),
+                    QUERY_FIELDS_END,
                 },
             });
 

@@ -107,6 +107,6 @@ b8 key_press(const Window *window, Key key) {
     return window->keyboard[key].pressed && window->keyboard[key].first_press;
 }
 
-b8 key_relase(const Window *window, Key key) {
+b8 key_release(const Window *window, Key key) {
     return !window->keyboard[key].pressed && window->keyboard[key].first_press;
 }
