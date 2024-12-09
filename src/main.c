@@ -132,8 +132,12 @@ i32 main(void) {
         renderer_end(renderer);
         renderer_submit(renderer);
 
+        if (key_press(window, KEY_A)) { printf("A press\n"); }
+        if (key_down(window, KEY_A)) { printf("A down\n"); }
+        if (key_relase(window, KEY_A)) { printf("A release\n"); }
+
         window_swap_buffers(window);
-        window_poll_event();
+        window_poll_event(window);
     }
 
     font_free(font);
