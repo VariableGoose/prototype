@@ -17,6 +17,8 @@ struct Camera {
 };
 uniform Camera cam;
 
+uniform mat4 projection;
+
 void main() {
     f_uv = uv;
     f_color = color;
@@ -27,4 +29,6 @@ void main() {
     float aspect = float(cam.screen_size.x)/float(cam.screen_size.y);
     screen_pos /= vec2(aspect*cam.zoom, cam.zoom)/2;
     gl_Position = vec4(screen_pos, 0.0, 1.0);
+
+    gl_Position = vec4(pos, 0.0, 1.0)*projection;
 }

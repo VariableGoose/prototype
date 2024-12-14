@@ -96,9 +96,7 @@ static inline Color color_hsv(f32 hue, f32 saturation, f32 value) {
 #define COLOR_GREEN ((Color) {0.0f, 1.0f, 0.0f, 1.0f})
 #define COLOR_BLUE ((Color) {0.0f, 0.0f, 1.0f, 1.0f})
 
-// -- Renderer -----------------------------------------------------------------
-// Context containing everything neccessary to perform rendering.
-typedef struct Renderer Renderer;
+// -- Camera -------------------------------------------------------------------
 
 typedef struct Camera Camera;
 struct Camera {
@@ -108,6 +106,13 @@ struct Camera {
     // Which direction is right and up.
     Vec2 direction;
 };
+
+extern Vec2 screen_to_world_space(Camera camera, Vec2 screen);
+extern Vec2 world_to_screen_space(Camera camera, Vec2 world);
+
+// -- Renderer -----------------------------------------------------------------
+// Context containing everything neccessary to perform rendering.
+typedef struct Renderer Renderer;
 
 extern Renderer *renderer_new(u32 max_batch_size, Allocator allocator);
 // This function still needs to be called even if renderer was created with a

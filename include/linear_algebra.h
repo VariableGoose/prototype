@@ -61,3 +61,67 @@ static inline Ivec2 ivec2_muls(Ivec2 vec, i32 scaler) { return ivec2(vec.x*scale
 static inline Ivec2 ivec2_divs(Ivec2 vec, i32 scaler) { return ivec2(vec.x/scaler, vec.y/scaler); }
 
 #define vec2_arg(vec) (vec).x, (vec).y
+
+typedef struct Vec4 Vec4;
+struct Vec4 {
+    f32 x, y, z, w;
+};
+
+static inline Vec4 vec4(f32 x, f32 y, f32 z, f32 w) { return (Vec4) {x, y, z, w}; }
+static inline Vec4 vec4s(f32 scaler) { return (Vec4) {scaler, scaler, scaler, scaler}; }
+
+typedef struct Mat4 Mat4;
+struct Mat4 {
+    Vec4 a, b, c, d;
+};
+
+static const Mat4 MAT4_IDENTITY = {
+    {1.0f, 0.0f, 0.0f, 0.0f},
+    {0.0f, 1.0f, 0.0f, 0.0f},
+    {0.0f, 0.0f, 1.0f, 0.0f},
+    {0.0f, 0.0f, 0.0f, 1.0f},
+};
+
+static inline Vec4 mat4_mul_vec(Mat4 mat, Vec4 vec) {
+    return (Vec4) {
+        vec.x*mat.a.x + vec.y*mat.a.y + vec.z*mat.a.z + vec.w*mat.a.w,
+        vec.x*mat.b.x + vec.y*mat.b.y + vec.z*mat.b.z + vec.w*mat.b.w,
+        vec.x*mat.c.x + vec.y*mat.c.y + vec.z*mat.c.z + vec.w*mat.c.w,
+        vec.x*mat.d.x + vec.y*mat.d.y + vec.z*mat.d.z + vec.w*mat.d.w,
+    };
+}
+
+// https://en.wikipedia.org/wiki/Orthographic_projection#Geometry
+static inline Mat4 mat4_ortho_projection(f32 left, f32 right, f32 top, f32 bottom, f32 far, f32 near) {
+    f32 x = 2.0f / (right - left);
+    f32 y = 2.0f / (top - bottom);
+    f32 z = -2.0f / (far - near);
+
+    f32 x_off = -(right+left) / (right-left);
+    f32 y_off = -(top+bottom) / (top-bottom);
+    f32 z_off = -(far+near) / (far-near);
+
+    return (Mat4) {
+        {x, 0, 0, x_off},
+        {0, y, 0, y_off},
+        {0, 0, z, z_off},
+        {0, 0, 0, 1},
+    };
+}
+
+static inline Mat4 mat4_inv_ortho_projection(f32 left, f32 right, f32 top, f32 bottom, f32 far, f32 near) {
+    f32 x = (right - left) / 2.0f;
+    f32 y = (top - bottom) / 2.0f;
+    f32 z = (far - near) / -2.0f;
+
+    f32 x_off = (left+right) / 2.0f;
+    f32 y_off = (top+bottom) / 2.0f;
+    f32 z_off = -(far+near) / 2.0f;
+
+    return (Mat4) {
+        {x, 0, 0, x_off},
+        {0, y, 0, y_off},
+        {0, 0, z, z_off},
+        {0, 0, 0, 1},
+    };
+}

@@ -9,6 +9,7 @@
 #include <glad/gl.h>
 #include <unibreakdef.h>
 
+#include "linear_algebra.h"
 #include "str.h"
 
 // -- Batch Renderer -----------------------------------------------------------
@@ -164,6 +165,11 @@ static void br_submit(BatchRenderer *br) {
     glUniform2fv(glGetUniformLocation(br->shader, "cam.pos"), 1, &br->camera.position.x);
     glUniform2fv(glGetUniformLocation(br->shader, "cam.dir"), 1, &br->camera.direction.x);
 
+    f32 aspect = (f32) br->camera.screen_size.x / (f32) br->camera.screen_size.y;
+    f32 zoom = br->camera.zoom / 2.0f;
+    Mat4 projection = mat4_ortho_projection(-aspect*zoom, aspect*zoom, zoom, -zoom, 1.0f, -1.0f);
+    glUniformMatrix4fv(glGetUniformLocation(br->shader, "projection"), 1, false, &projection.a.x);
+
     glBindVertexArray(br->vao);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, br->ibo);
 
@@ -218,6 +224,7 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, Vec2 origin, TextureAtlas
         vert->pos = vec2_sub(vert->pos, vec2_divs(vec2_mul(origin, br->camera.direction), 2.0f));
         vert->pos = vec2_mul(vert->pos, quad.size);
         vert->pos = vec2_add(vert->pos, vec2_mul(quad.pos, br->camera.direction));
+        vert->pos = vec2_sub(vert->pos, vec2_mul(br->camera.position, br->camera.direction));
 
         vert->uv = uvs[i];
         vert->color = color;

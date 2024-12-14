@@ -74,6 +74,12 @@ void *ecs_query_iter_get_field(QueryIter iter, size_t field) {
     return archetype->storage[row];
 }
 
+Entity ecs_query_iter_get_entity(QueryIter iter, size_t i) {
+    assert(i < iter.count);
+    Archetype *archetype = ((Vec(Archetype *)) iter._query._archetypes)[iter._i];
+    return hash_map_get(archetype->entity_lookup, i);
+}
+
 void ecs_query_free(Query query) {
     vec_free(query._archetypes);
 }

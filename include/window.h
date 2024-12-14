@@ -150,3 +150,5 @@ extern b8 key_down(const Window *window, Key key);
 extern b8 key_up(const Window *window, Key key);
 extern b8 key_press(const Window *window, Key key);
 extern b8 key_release(const Window *window, Key key);
+
+extern Vec2 mouse_position(const Window *window);

@@ -18,6 +18,9 @@ struct Window {
 
     KeyMod mods;
     KeyState keyboard[GLFW_KEY_LAST];
+    struct {
+        Vec2 pos;
+    } mouse;
 };
 
 static void resize_callback(GLFWwindow* handle, int width, int height) {
@@ -43,6 +46,11 @@ static void key_callback(GLFWwindow* handle, int key, int scancode, int action, 
     }
 }
 
+static void cursor_pos_callback(GLFWwindow* handle, double xpos, double ypos) {
+    Window *window = glfwGetWindowUserPointer(handle);
+    window->mouse.pos = vec2(xpos, ypos);
+}
+
 Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Allocator allocator) {
     Window *window = allocator.alloc(sizeof(Window), allocator.ctx);
 
@@ -57,9 +65,12 @@ Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Alloc
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, resizable);
     window->handle = glfwCreateWindow(width, height, title, NULL, NULL);
+    glfwSetWindowUserPointer(window->handle, window);
+
     glfwSetFramebufferSizeCallback(window->handle, resize_callback);
     glfwSetKeyCallback(window->handle, key_callback);
-    glfwSetWindowUserPointer(window->handle, window);
+    glfwSetCursorPosCallback(window->handle, cursor_pos_callback);
+
     glfwMakeContextCurrent(window->handle);
 
     return window;
@@ -113,4 +124,8 @@ b8 key_press(const Window *window, Key key) {
 
 b8 key_release(const Window *window, Key key) {
     return !window->keyboard[key].pressed && window->keyboard[key].first_press;
+}
+
+Vec2 mouse_position(const Window *window) {
+    return window->mouse.pos;
 }

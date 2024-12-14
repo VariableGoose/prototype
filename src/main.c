@@ -71,9 +71,13 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     for (u32 i = 0; i < iter.count; i++) {
         body[i].velocity.x = 0.0f;
+        body[i].velocity.y = 0.0f;
         body[i].velocity.x -= key_down(state->window, KEY_A);
         body[i].velocity.x += key_down(state->window, KEY_D);
+        body[i].velocity.y -= key_down(state->window, KEY_S);
+        body[i].velocity.y += key_down(state->window, KEY_W);
         body[i].velocity.x *= controller[i].speed;
+        body[i].velocity.y *= controller[i].speed;
 
         if (key_press(state->window, KEY_SPACE)) {
             body[i].velocity.y = 30.0f;
@@ -83,28 +87,6 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             body[i].velocity.y /= 2.0f;
         }
     }
-}
-
-void physics_step_body(GameState *state, Transform *transform, PhysicsBody *body, f32 dt) {
-    if (body->is_static) {
-        return;
-    }
-    body->velocity.y += state->gravity*body->gravity_multiplier*state->dt_fixed;
-    transform->pos = vec2_add(transform->pos, vec2_muls(body->velocity, dt));
-}
-
-void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
-    (void) ecs;
-    GameState *state = user_ptr;
-
-    Transform *transform = ecs_query_iter_get_field(iter, 0);
-    PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
-    for (u32 i = 0; i < iter.count; i++) {
-        physics_step_body(state, &transform[i], &body[i], state->dt_fixed);
-    }
-
-    // TODO: Implement spatial hashing and do collision detection/resolution
-    // with swept aabb.
 }
 
 // -----------------------------------------------------------------------------
@@ -147,23 +129,83 @@ void setup_ecs(GameState *state) {
                 QUERY_FIELDS_END,
             },
         });
-
-    ecs_register_system(state->ecs, physics_system, state->fixed_group, (QueryDesc) {
-            .user_ptr = state,
-            .fields = {
-                [0] = ecs_id(state->ecs, Transform),
-                [1] = ecs_id(state->ecs, PhysicsBody),
-                QUERY_FIELDS_END,
-            },
-        });
 }
 
 typedef struct PhysicsObject PhysicsObject;
 struct PhysicsObject {
+    Entity id;
     Transform transform;
-    Renderable renderable;
     PhysicsBody body;
 };
+
+typedef struct PhysicsWorld PhysicsWorld;
+struct PhysicsWorld {
+    Vec(PhysicsObject) bodies;
+};
+
+PhysicsWorld physics_world_init(GameState *state) {
+    PhysicsWorld world = {0};
+
+    // Pull entities out of the ecs.
+    Query query = ecs_query(state->ecs, (QueryDesc) {
+            .fields = {
+                ecs_id(state->ecs, Transform),
+                ecs_id(state->ecs, PhysicsBody),
+            },
+        });
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *transform = ecs_query_iter_get_field(iter, 0);
+        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            PhysicsObject obj = {
+                .id = ecs_query_iter_get_entity(iter, j),
+                .transform = transform[j],
+                .body = body[j],
+            };
+            vec_push(world.bodies, obj);
+        }
+    }
+    ecs_query_free(query);
+
+    return world;
+}
+
+void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
+    for (u32 i = 0; i < vec_len(world->bodies); i++) {
+        PhysicsObject *obj = &world->bodies[i];
+        if (obj->body.is_static) {
+            return;
+        }
+        obj->body.velocity.y += state->gravity*obj->body.gravity_multiplier*dt;
+        obj->transform.pos = vec2_add(obj->transform.pos, vec2_muls(obj->body.velocity, dt));
+    }
+
+    for (u32 i = 0; i < vec_len(world->bodies); i++) {
+        for (u32 j = 0; j < vec_len(world->bodies); j++) {
+        }
+    }
+}
+
+void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
+    for (u32 i = 0; i < vec_len(world->bodies); i++) {
+        PhysicsObject obj = world->bodies[i];
+        Transform *transform = entity_get_component(state->ecs, obj.id, Transform);
+        PhysicsBody *body = entity_get_component(state->ecs, obj.id, PhysicsBody);
+        *transform = obj.transform;
+        *body = obj.body;
+    }
+}
+
+void physics_world_free(PhysicsWorld *world) {
+    vec_free(world->bodies);
+}
+
+PhysicsWorld physics_world_snapshot(PhysicsWorld *world) {
+    PhysicsWorld snapshot = {0};
+    vec_insert_arr(snapshot.bodies, 0, world->bodies, vec_len(world->bodies));
+    return snapshot;
+}
 
 i32 main(void) {
     GameState game_state = game_state_new();
@@ -183,7 +225,7 @@ i32 main(void) {
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, player, PhysicsBody, {
-            .gravity_multiplier = 10.0f,
+            .gravity_multiplier = 0.0f,
             .is_static = false,
         });
 
@@ -200,10 +242,25 @@ i32 main(void) {
             .is_static = true,
         });
 
+    // Entity other = ecs_entity(game_state.ecs);
+    // entity_add_component(game_state.ecs, other, Transform, {
+    //         .pos = vec2(0.0f, 0.0f),
+    //         .size = vec2(1.0f, 1.0f),
+    //     });
+    // entity_add_component(game_state.ecs, other, PhysicsBody, {
+    //         .is_static = true,
+    //     });
+    // entity_add_component(game_state.ecs, other, Renderable, {
+    //         .color = color_rgb_hex(0xff00ff),
+    //         .texture = TEXTURE_NULL,
+    //     });
+
     u32 fps = 0;
     f32 fps_timer = 0.0f;
 
-    Vec(PhysicsObject) snapshot = NULL;
+    Vec2 pos = vec2s(0.0f);
+
+    Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
     f32 last_time_step = 0.0f;
     f32 last = glfwGetTime();
@@ -225,50 +282,62 @@ i32 main(void) {
         for (u8 i = 0;
                 i < 10 && last_time_step >= game_state.dt_fixed;
                 i++, last_time_step -= game_state.dt_fixed) {
-            vec_free(snapshot);
-            Query query = ecs_query(game_state.ecs, (QueryDesc) {
-                    .fields = {
-                        ecs_id(game_state.ecs, Transform),
-                        ecs_id(game_state.ecs, Renderable),
-                        ecs_id(game_state.ecs, PhysicsBody),
-                    },
-                });
-            for (u32 i = 0; i < query.count; i++) {
-                QueryIter iter = ecs_query_get_iter(query, i);
-                Transform *transform = ecs_query_iter_get_field(iter, 0);
-                Renderable *renderable = ecs_query_iter_get_field(iter, 1);
-                PhysicsBody *body = ecs_query_iter_get_field(iter, 2);
-                for (u32 j = 0; j < iter.count; j++) {
-                    vec_push(snapshot, ((PhysicsObject) {
-                            .transform = transform[j],
-                            .renderable = renderable[j],
-                            .body = body[j],
-                        }));
-                }
-            }
+            // ecs_run_group(game_state.ecs, game_state.fixed_group);
 
-            ecs_run_group(game_state.ecs, game_state.fixed_group);
+            // TODO: Implement spatial hashing and do collision detection/resolution
+            // with swept aabb.
+            // PhysicsWorld world = physics_world_init(&game_state);
+            // physics_world_step(&world, &game_state, game_state.dt_fixed);
+            // physics_world_update_ecs(&world, &game_state);
+            // physics_world_free(&world);
         }
-        ecs_run_group(game_state.ecs, game_state.free_group);
+        // ecs_run_group(game_state.ecs, game_state.free_group);
+
+        pos.x += game_state.dt;
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
         glClear(GL_COLOR_BUFFER_BIT);
-        renderer_begin(game_state.renderer, (Camera) {
-                .screen_size = window_get_size(game_state.window),
-                .direction = vec2s(1.0f),
-                .position = vec2s(0.0f),
-                .zoom = 25.0f,
-            });
+        Camera game_cam = {
+            .screen_size = window_get_size(game_state.window),
+            .direction = vec2s(1.0f),
+            .position = vec2(0.0f, 0.0f),
+            .zoom = 25.0f,
+        };
+        renderer_begin(game_state.renderer, game_cam);
 
-        for (u32 i = 0; i < vec_len(snapshot); i++) {
-            PhysicsObject obj = snapshot[i];
-            physics_step_body(&game_state, &obj.transform, &obj.body, last_time_step);
-            renderer_draw_quad(game_state.renderer, (Quad) {
-                    .pos = obj.transform.pos,
-                    .size = obj.transform.size,
-                }, vec2s(0.0f), obj.renderable.texture, obj.renderable.color);
-        }
+        // Quad mouse_quad = {
+        //     .pos = screen_to_world_space(game_cam, mouse_position(game_state.window)),
+        //     .size = vec2s(10.0f),
+        // };
+        // renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+
+        Ivec2 screen_size = window_get_size(game_state.window);
+        Quad mouse_quad = {
+            .pos = screen_to_world_space(game_cam, mouse_position(game_state.window)),
+            // .pos = pos,
+            .size = vec2s(1.0f),
+        };
+        renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+
+        renderer_end(game_state.renderer);
+        renderer_submit(game_state.renderer);
+
+        Camera screen_cam = {
+            .screen_size = screen_size,
+            .zoom = screen_size.y,
+            .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
+            .direction = vec2(1.0f, -1.0f),
+        };
+        renderer_begin(game_state.renderer, screen_cam);
+
+        mouse_quad = (Quad) {
+            .pos = mouse_position(game_state.window),
+            // .pos = world_to_screen_space(game_cam, pos),
+            .size = vec2s(10.0f),
+        };
+        renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_RED);
+        renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
