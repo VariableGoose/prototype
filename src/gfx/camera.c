@@ -8,9 +8,11 @@ Vec2 screen_to_world_space(Camera camera, Vec2 screen) {
     f32 aspect = (f32) camera.screen_size.x / (f32) camera.screen_size.y;
     f32 zoom = camera.zoom / 2.0f;
     Mat4 projection = mat4_inv_ortho_projection(-aspect*zoom, aspect*zoom, zoom, -zoom, 1.0f, -1.0f);
-    Vec4 world = mat4_mul_vec(projection, normalized);
-    world.y = -world.y;
-    printf("(%f, %f) -> (%f, %f)\n", vec2_arg(screen), vec2_arg(world));
+    Vec4 world_v4 = mat4_mul_vec(projection, normalized);
+    Vec2 world = vec2(vec2_arg(world_v4));
+    world = vec2_mul(world, camera.direction);
+    world = vec2_mul(world, vec2(1.0f, -1.0));
+    // printf("(%f, %f) -> (%f, %f)\n", vec2_arg(screen), vec2_arg(world));
     return vec2(vec2_arg(world));
 }
 

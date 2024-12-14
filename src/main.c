@@ -4,6 +4,7 @@
 #include "linear_algebra.h"
 #include "window.h"
 #include "ds.h"
+#include <math.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -207,10 +208,72 @@ PhysicsWorld physics_world_snapshot(PhysicsWorld *world) {
     return snapshot;
 }
 
+typedef struct CollisionManifold CollisionManifold;
+struct CollisionManifold {
+    b8 is_colliding;
+    Vec2 depth;
+    Vec2 normal;
+};
+
+CollisionManifold colliding(Quad a, Quad b) {
+    CollisionManifold manifold = {0};
+
+    // https://blog.hamaluik.ca/posts/simple-aabb-collision-using-minkowski-difference/
+    Vec2 a_bottom_left = vec2_sub(a.pos, vec2_divs(a.size, 2.0f));
+    Vec2 b_top_right = vec2_add(b.pos, vec2_divs(b.size, 2.0f));
+    Vec2 size = vec2_add(a.size, b.size);
+    Vec2 min = vec2_sub(a_bottom_left, b_top_right);
+    Vec2 max = vec2_add(min, size);
+    manifold.is_colliding = (
+            min.x <= 0.0f &&
+            max.x >= 0.0f &&
+            min.y <= 0.0f &&
+            max.y >= 0.0f
+        );
+
+    if (!manifold.is_colliding) {
+        return manifold;
+    }
+
+    f32 min_dist = fabsf(-min.x);
+    Vec2 bound_point = vec2(min.x, 0.0f);
+    if (fabsf(max.x) < min_dist) {
+        min_dist = fabsf(max.x);
+        bound_point = vec2(max.x, 0.0f);
+    }
+    if (fabsf(max.y) < min_dist) {
+        min_dist = fabsf(max.y);
+        bound_point = vec2(0.0f, max.y);
+    }
+    if (fabsf(min.y) < min_dist) {
+        min_dist = fabsf(min.y);
+        bound_point = vec2(0.0f, min.y);
+    }
+    manifold.depth = bound_point;
+
+    if (fabsf(manifold.depth.x) > fabsf(manifold.depth.y)) {
+        if (manifold.depth.x > 0.0f) {
+            manifold.normal.x = 1.0f;
+        } else {
+            manifold.normal.x = -1.0f;
+        }
+    } else {
+        if (manifold.depth.y > 0.0f) {
+            manifold.normal.y = 1.0f;
+        } else {
+            manifold.normal.y = -1.0f;
+        }
+    }
+
+    return manifold;
+}
+
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
     window_set_vsync(game_state.window, false);
+
+    Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
     Entity player = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, player, Transform, {
@@ -258,10 +321,6 @@ i32 main(void) {
     u32 fps = 0;
     f32 fps_timer = 0.0f;
 
-    Vec2 pos = vec2s(0.0f);
-
-    Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
-
     f32 last_time_step = 0.0f;
     f32 last = glfwGetTime();
     while (window_is_open(game_state.window)) {
@@ -286,6 +345,7 @@ i32 main(void) {
 
             // TODO: Implement spatial hashing and do collision detection/resolution
             // with swept aabb.
+
             // PhysicsWorld world = physics_world_init(&game_state);
             // physics_world_step(&world, &game_state, game_state.dt_fixed);
             // physics_world_update_ecs(&world, &game_state);
@@ -293,36 +353,55 @@ i32 main(void) {
         }
         // ecs_run_group(game_state.ecs, game_state.free_group);
 
-        pos.x += game_state.dt;
-
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
         glClear(GL_COLOR_BUFFER_BIT);
         Camera game_cam = {
             .screen_size = window_get_size(game_state.window),
-            .direction = vec2s(1.0f),
+            .direction = vec2(1.0f, 1.0f),
             .position = vec2(0.0f, 0.0f),
             .zoom = 25.0f,
         };
         renderer_begin(game_state.renderer, game_cam);
 
-        // Quad mouse_quad = {
-        //     .pos = screen_to_world_space(game_cam, mouse_position(game_state.window)),
-        //     .size = vec2s(10.0f),
-        // };
-        // renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
 
-        Ivec2 screen_size = window_get_size(game_state.window);
-        Quad mouse_quad = {
-            .pos = screen_to_world_space(game_cam, mouse_position(game_state.window)),
-            // .pos = pos,
-            .size = vec2s(1.0f),
+
+        Quad a = {
+            .pos = vec2(0.0f, 0.0f),
+            .size = vec2(10.0f, 10.0f),
         };
-        renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+        Quad b = {
+            .pos = screen_to_world_space(game_cam, mouse_position(game_state.window)),
+            .size = vec2(1.0f, 1.0f),
+        };
+        CollisionManifold manifold = colliding(a, b);
+
+
+
+        // renderer_draw_quad(game_state.renderer, minkowski_diff, vec2s(0.0f), TEXTURE_NULL, colliding ? COLOR_RED : color_rgb_hex(0x808080));
+        renderer_draw_quad(game_state.renderer, a, vec2s(0.0f), TEXTURE_NULL, manifold.is_colliding ? color_rgb_hex(0xa53030) : COLOR_WHITE);
+        renderer_draw_quad(game_state.renderer, b, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+        if (manifold.is_colliding) {
+            Quad resolved = {
+                .pos = vec2_add(b.pos, manifold.depth),
+                .size = b.size,
+            };
+            renderer_draw_quad(game_state.renderer, resolved, vec2s(0.0f), TEXTURE_NULL, color_rgb_hex(0x75a743));
+
+            Quad normal = {
+                .pos = a.pos,
+                .size = vec2s(1.0f),
+            };
+            normal.pos = vec2_add(normal.pos, vec2_mul(vec2_divs(a.size, 2.0f), manifold.normal));
+            normal.size = vec2_mul(normal.size, vec2_muls(manifold.normal, 1.0f));
+            normal.size = vec2_adds(normal.size, 0.1f);
+            renderer_draw_quad(game_state.renderer, normal, vec2s(0.0f), TEXTURE_NULL, color_rgb_hex(0x4f8fba));
+        }
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
 
+        Ivec2 screen_size = window_get_size(game_state.window);
         Camera screen_cam = {
             .screen_size = screen_size,
             .zoom = screen_size.y,
@@ -331,12 +410,6 @@ i32 main(void) {
         };
         renderer_begin(game_state.renderer, screen_cam);
 
-        mouse_quad = (Quad) {
-            .pos = mouse_position(game_state.window),
-            // .pos = world_to_screen_space(game_cam, pos),
-            .size = vec2s(10.0f),
-        };
-        renderer_draw_quad(game_state.renderer, mouse_quad, vec2s(0.0f), TEXTURE_NULL, COLOR_RED);
         renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
 
         renderer_end(game_state.renderer);
