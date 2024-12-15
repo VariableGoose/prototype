@@ -140,6 +140,12 @@ void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
     return column->archetype->storage[*row] + component_size*column->index;
 }
 
+b8 entity_alive(ECS *ecs, Entity entity) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    return index < ecs->entity_current_id && ecs->entity_generation[index] == generation;
+}
+
 SystemGroup ecs_system_group(ECS *ecs) {
     SystemGroup group = vec_len(ecs->systems);
     vec_push(ecs->systems, NULL);

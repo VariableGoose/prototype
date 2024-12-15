@@ -32,6 +32,10 @@ Archetype *archetype_new(const ECS *ecs, Type type) {
     *archetype = (Archetype) {
         .type = type_clone(type),
     };
+    HashMapDesc entity_lookup_desc = hash_map_desc_default(archetype->entity_lookup);
+    Entity invalid = -1;
+    entity_lookup_desc.zero_value = &invalid;
+    hash_map_new(archetype->entity_lookup, entity_lookup_desc);
 
     for (size_t i = 0; i < type_len(type); i++) {
         vec_push(archetype->storage, vec_new(ecs->components[type[i]].size));
@@ -117,6 +121,7 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
     Entity last_current_entity = hash_map_get(current->entity_lookup, current->current_index-1);
     // It's crucial that we get the entity to move before doing all the swaping.
     Entity entity_to_move = hash_map_get(current->entity_lookup, current_column);
+
     ArchetypeColumn column = {
         .archetype = current,
         .index = current_column,
@@ -157,6 +162,11 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
     for (size_t i = 0; i < type_len(current->type); i++) {
         _vec_remove_fast(&current->storage[i], current_column, NULL);
     }
+
+    // if (entity_to_move == 420) {
+    //     ArchetypeColumn *col = hash_map_getp(ecs->entity_map, entity_to_move);
+    //     printf("It moved to %p\n", col);
+    // }
 }
 
 void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *component_data, ComponentId component_id, size_t left_column) {

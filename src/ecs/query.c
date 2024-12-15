@@ -25,6 +25,8 @@ Query ecs_query(ECS *ecs, QueryDesc desc) {
         Vec(Archetype *) archetypes = hash_set_to_vec(sets[0]);
         return (Query) {
             .count = vec_len(archetypes),
+            ._desc = desc,
+            ._field_count = field_count,
             ._archetypes = (void **) archetypes,
         };
     }

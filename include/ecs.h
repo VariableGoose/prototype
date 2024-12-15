@@ -36,6 +36,8 @@ extern void _entity_remove_component(ECS *ecs, Entity entity, Str component_name
     _entity_get_component(ecs, entity, str_lit(#component))
 extern void *_entity_get_component(ECS *ecs, Entity entity, Str component_name);
 
+extern b8 entity_alive(ECS *ecs, Entity entity);
+
 // extern void entity_add_entity(ECS *ecs, Entity self, Entity other);
 // extern void entity_remove_entity(ECS *ecs, Entity self, Entity other);
 
