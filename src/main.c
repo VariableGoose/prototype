@@ -38,6 +38,8 @@ typedef struct PlayerController PlayerController;
 struct PlayerController {
     f32 speed;
     b8 grounded;
+    f32 shoot_timer;
+    f32 shoot_delay;
 };
 
 typedef struct Renderable Renderable;
@@ -89,11 +91,6 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         body[i].velocity.x += key_down(state->window, KEY_D);
         body[i].velocity.x *= controller[i].speed;
 
-        // body[i].velocity.y = 0.0f;
-        // body[i].velocity.y -= key_down(state->window, KEY_S);
-        // body[i].velocity.y += key_down(state->window, KEY_W);
-        // body[i].velocity.y *= controller[i].speed;
-
         if (key_down(state->window, KEY_SPACE) && controller[i].grounded && body[i].velocity.y <= 0.0f) {
             body[i].velocity.y = 30.0f;
             controller[i].grounded = false;
@@ -108,7 +105,29 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             body[i].velocity = vec2s(0.0f);
         }
 
-        // state->cam.position = vec2_lerp(state->cam.position, transform[i].pos, state->dt*5.0f);
+        controller[i].shoot_timer -= state->dt;
+        // Shooting
+        if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer <= 0.0f) {
+            Entity projectile = ecs_entity(state->ecs);
+            Vec2 dir = vec2_sub(screen_to_world_space(state->cam, mouse_position(state->window)), transform[i].pos);
+            dir = vec2_normalized(dir);
+            dir = vec2_muls(dir, 10.0f);
+            printf("%f, %f\n", vec2_arg(dir));
+            entity_add_component(state->ecs, projectile, Transform, {
+                    .pos = transform[i].pos,
+                    .size = vec2s(0.25f),
+                });
+            entity_add_component(state->ecs, projectile, Renderable, {
+                    .color = color_hsv(0.0f, 0.75f, 1.0f),
+                });
+            entity_add_component(state->ecs, projectile, PhysicsBody, {
+                    .gravity_multiplier = 0.0f,
+                    .velocity = dir,
+                });
+
+            controller[i].shoot_timer = controller[i].shoot_delay;
+        }
+
         state->cam.position = transform[i].pos;
     }
 }
@@ -228,6 +247,8 @@ static CollisionManifold colliding(Transform a, Transform b) {
 
 PhysicsWorld physics_world_init(GameState *state) {
     PhysicsWorld world = {0};
+
+    // TODO: Implement spatial hashing.
 
     // Pull entities out of the ecs.
     Query query = ecs_query(state->ecs, (QueryDesc) {
@@ -359,6 +380,7 @@ i32 main(void) {
         });
     entity_add_component(game_state.ecs, player, PlayerController, {
             .speed = 10.0f,
+            .shoot_delay = 0.1f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
             .color = COLOR_WHITE,
@@ -437,20 +459,12 @@ i32 main(void) {
                 i++, last_time_step -= game_state.dt_fixed) {
             ecs_run_group(game_state.ecs, game_state.fixed_group);
 
-            // TODO: Implement spatial hashing and do collision detection/resolution
-            // with swept aabb.
-
             PhysicsWorld world = physics_world_init(&game_state);
             physics_world_step(&world, &game_state, game_state.dt_fixed);
             physics_world_update_ecs(&world, &game_state);
             physics_world_free(&world);
         }
         ecs_run_group(game_state.ecs, game_state.free_group);
-
-        // PhysicsWorld world = physics_world_init(&game_state);
-        // physics_world_step(&world, &game_state, game_state.dt);
-        // physics_world_update_ecs(&world, &game_state);
-        // physics_world_free(&world);
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));

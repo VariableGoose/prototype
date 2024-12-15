@@ -1,5 +1,6 @@
 #include "window.h"
 #include "core.h"
+#include <stdio.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -17,9 +18,10 @@ struct Window {
     Ivec2 size;
 
     KeyMod mods;
-    KeyState keyboard[GLFW_KEY_LAST];
+    KeyState keyboard[KEY_COUNT];
     struct {
         Vec2 pos;
+        KeyState button[MOUSE_BUTTON_COUNT];
     } mouse;
 };
 
@@ -51,6 +53,21 @@ static void cursor_pos_callback(GLFWwindow* handle, double xpos, double ypos) {
     window->mouse.pos = vec2(xpos, ypos);
 }
 
+static void mouse_button_callback(GLFWwindow* handle, int button, int action, int mods) {
+    Window *window = glfwGetWindowUserPointer(handle);
+    window->mods = mods;
+    switch (action) {
+        case GLFW_PRESS:
+            window->mouse.button[button].pressed = true;
+            window->mouse.button[button].first_press = true;
+            break;
+        case GLFW_RELEASE:
+            window->mouse.button[button].pressed = false;
+            window->mouse.button[button].first_press = true;
+            break;
+    }
+}
+
 Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Allocator allocator) {
     Window *window = allocator.alloc(sizeof(Window), allocator.ctx);
 
@@ -70,6 +87,7 @@ Window *window_new(u32 width, u32 height, const char *title, b8 resizable, Alloc
     glfwSetFramebufferSizeCallback(window->handle, resize_callback);
     glfwSetKeyCallback(window->handle, key_callback);
     glfwSetCursorPosCallback(window->handle, cursor_pos_callback);
+    glfwSetMouseButtonCallback(window->handle, mouse_button_callback);
 
     glfwMakeContextCurrent(window->handle);
 
@@ -90,6 +108,9 @@ void window_set_vsync(Window *window, b8 vsync) {
 void window_poll_event(Window *window) {
     for (u32 i = 0; i < arrlen(window->keyboard); i++) {
         window->keyboard[i].first_press = false;
+    }
+    for (u32 i = 0; i < arrlen(window->mouse.button); i++) {
+        window->mouse.button[i].first_press = false;
     }
     glfwPollEvents();
 }
@@ -128,4 +149,20 @@ b8 key_release(const Window *window, Key key) {
 
 Vec2 mouse_position(const Window *window) {
     return window->mouse.pos;
+}
+
+b8 mouse_button_down(const Window *window, MouseButton button) {
+    return window->mouse.button[button].pressed;
+}
+
+b8 mouse_button_up(const Window *window, MouseButton button) {
+    return !window->mouse.button[button].pressed;
+}
+
+b8 mouse_button_press(const Window *window, MouseButton button) {
+    return window->mouse.button[button].pressed && window->mouse.button[button].first_press;
+}
+
+b8 mouse_button_release(const Window *window, MouseButton button) {
+    return !window->mouse.button[button].pressed && window->mouse.button[button].first_press;
 }

@@ -143,6 +143,8 @@ typedef enum {
     KEY_RIGHT_ALT          = 346,
     KEY_RIGHT_SUPER        = 347,
     KEY_MENU               = 348,
+
+    KEY_COUNT,
 } Key;
 
 extern KeyMod key_get_mods(const Window *window);
@@ -151,4 +153,16 @@ extern b8 key_up(const Window *window, Key key);
 extern b8 key_press(const Window *window, Key key);
 extern b8 key_release(const Window *window, Key key);
 
+typedef enum {
+    MOUSE_BUTTON_LEFT,
+    MOUSE_BUTTON_RIGHT,
+    MOUSE_BUTTON_MIDDLE,
+
+    MOUSE_BUTTON_COUNT,
+} MouseButton;
+
 extern Vec2 mouse_position(const Window *window);
+extern b8 mouse_button_down(const Window *window, MouseButton button);
+extern b8 mouse_button_up(const Window *window, MouseButton button);
+extern b8 mouse_button_press(const Window *window, MouseButton button);
+extern b8 mouse_button_release(const Window *window, MouseButton button);
