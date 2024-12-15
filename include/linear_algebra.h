@@ -21,6 +21,10 @@ static inline Vec2 vec2_subs(Vec2 vec, f32 scaler) { return vec2(vec.x-scaler, v
 static inline Vec2 vec2_muls(Vec2 vec, f32 scaler) { return vec2(vec.x*scaler, vec.y*scaler); }
 static inline Vec2 vec2_divs(Vec2 vec, f32 scaler) { return vec2(vec.x/scaler, vec.y/scaler); }
 
+static inline f32 vec2_dot(Vec2 a, Vec2 b) {
+    return a.x*b.x + a.y*b.y;
+}
+
 static inline f32 vec2_magnitude_squared(Vec2 vec) {
     return vec.x*vec.x+vec.y*vec.y;
 }
