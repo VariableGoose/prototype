@@ -73,6 +73,21 @@ struct InternalSystem {
     QueryDesc desc;
 };
 
+typedef enum {
+    COMMAND_ENTITY_SPAWN,
+    COMMAND_ENTITY_KILL,
+    COMMAND_ENTITY_COMPONENT_ADD,
+    COMMAND_ENTITY_COMPONENT_REMOVE,
+} CommandType;
+
+typedef struct Command Command;
+struct Command {
+    CommandType type;
+    Entity entity;
+    ComponentId component_id;
+    void *data;
+};
+
 struct ECS {
     HashMap(Str, ComponentId) component_map;
     Vec(Component) components;
@@ -88,4 +103,12 @@ struct ECS {
     HashMap(ComponentId, HashSet(Archetype *)) component_archetype_set_map;
 
     Vec(Vec(InternalSystem)) systems;
+
+    // Commands are deferred and executed once a query has finished because
+    // it's not safe to modify the data which is being executed upon within
+    // a query/system.
+    u32 active_queries; 
+    Vec(Command) command_queue;
 };
+
+extern void _ecs_process_command_queue(ECS *ecs);

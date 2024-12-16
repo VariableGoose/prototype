@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 Query ecs_query(ECS *ecs, QueryDesc desc) {
+    ecs->active_queries++;
+
     size_t field_count = 0;
     Vec(HashSet(Archetype *)) sets = NULL;
     for (; field_count < MAX_QUERY_FIELDS; field_count++) {
@@ -82,6 +84,11 @@ Entity ecs_query_iter_get_entity(QueryIter iter, size_t i) {
     return hash_map_get(archetype->entity_lookup, i);
 }
 
-void ecs_query_free(Query query) {
+void ecs_query_free(ECS *ecs, Query query) {
+    ecs->active_queries--;
     vec_free(query._archetypes);
+
+    if (ecs->active_queries == 0) {
+        _ecs_process_command_queue(ecs);
+    }
 }

@@ -69,6 +69,11 @@ Entity _ecs_id(ECS *ecs, Str component_name) {
     return hash_map_get(ecs->component_map, component_name);
 }
 
+static void _ecs_internal_entity_spawn(ECS *ecs, Entity id) {
+    ArchetypeColumn column = archetype_add_entity(ecs->root_archetype, id);
+    hash_map_insert(ecs->entity_map, id, column);
+}
+
 Entity ecs_entity(ECS *ecs) {
     uint32_t index = 0;
     uint32_t generation = 0;
@@ -81,16 +86,21 @@ Entity ecs_entity(ECS *ecs) {
     }
 
     Entity id = index | (uint64_t) generation << 32;
-    ArchetypeColumn column = archetype_add_entity(ecs->root_archetype, id);
-    hash_map_insert(ecs->entity_map, id, column);
+
+    if (ecs->active_queries > 0) {
+        vec_push(ecs->command_queue, ((Command) {
+                .type = COMMAND_ENTITY_SPAWN,
+                .entity = id,
+            }));
+    } else {
+        _ecs_internal_entity_spawn(ecs, id);
+    }
 
     return id;
 }
 
-void ecs_entity_kill(ECS *ecs, Entity entity) {
+static void _ecs_internal_kill(ECS *ecs, Entity entity) {
     uint32_t index = entity;
-    uint32_t generation = entity >> 32;
-    assert(ecs->entity_generation[index] == generation);
 
     ecs->entity_generation[index]++;
     vec_push(ecs->entity_free_list, index);
@@ -100,16 +110,55 @@ void ecs_entity_kill(ECS *ecs, Entity entity) {
     archetype_remove_entity(ecs, column.archetype, column.index);
 }
 
+void ecs_entity_kill(ECS *ecs, Entity entity) {
+    uint32_t index = entity;
+    uint32_t generation = entity >> 32;
+    assert(ecs->entity_generation[index] == generation);
+
+    if (ecs->active_queries > 0) {
+        vec_push(ecs->command_queue, ((Command) {
+                .type = COMMAND_ENTITY_KILL,
+                .entity = entity,
+            }));
+    } else {
+        _ecs_internal_kill(ecs, entity);
+    }
+}
+
+static void _entity_internal_add_component(ECS *ecs, Entity entity, ComponentId component_id, const void *data) {
+    ArchetypeColumn column = hash_map_get(ecs->entity_map, entity);
+    Archetype *left_archetype = column.archetype;
+
+    archetype_move_entity_right(ecs, left_archetype, data, component_id, column.index);
+}
+
 void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const void *data) {
     uint32_t index = entity;
     uint32_t generation = entity >> 32;
     assert(ecs->entity_generation[index] == generation);
 
-    ArchetypeColumn column = hash_map_get(ecs->entity_map, entity);
-    Archetype *left_archetype = column.archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
-    archetype_move_entity_right(ecs, left_archetype, data, component_id, column.index);
+    if (ecs->active_queries > 0) {
+        u64 component_size = ecs->components[component_id].size;
+        void *data_copy = malloc(component_size);
+        memcpy(data_copy, data, component_size);
+        vec_push(ecs->command_queue, ((Command) {
+                .type = COMMAND_ENTITY_COMPONENT_ADD,
+                .entity = entity,
+                .component_id = component_id,
+                .data = data_copy,
+            }));
+    } else {
+        _entity_internal_add_component(ecs, entity, component_id, data);
+    }
+}
+
+static void _entity_internal_remove_component(ECS *ecs, Entity entity, ComponentId component_id) {
+    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
+    Archetype *right_archetype = column->archetype;
+
+    archetype_move_entity_left(ecs, right_archetype, component_id, column->index);
 }
 
 void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
@@ -117,11 +166,17 @@ void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
     uint32_t generation = entity >> 32;
     assert(ecs->entity_generation[index] == generation);
 
-    ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
-    Archetype *right_archetype = column->archetype;
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
 
-    archetype_move_entity_left(ecs, right_archetype, component_id, column->index);
+    if (ecs->active_queries > 0) {
+        vec_push(ecs->command_queue, ((Command) {
+                .type = COMMAND_ENTITY_COMPONENT_REMOVE,
+                .entity = entity,
+                .component_id = component_id,
+            }));
+    } else {
+        _entity_internal_remove_component(ecs, entity, component_id);
+    }
 }
 
 void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
@@ -176,4 +231,28 @@ void ecs_run_system(ECS *ecs, System system, QueryDesc desc) {
         QueryIter iter = ecs_query_get_iter(query, i);
         system(ecs, iter, desc.user_ptr);
     }
+    ecs_query_free(ecs, query);
+}
+
+void _ecs_process_command_queue(ECS *ecs) {
+    for (u32 i = 0; i < vec_len(ecs->command_queue); i++) {
+        Command cmd = ecs->command_queue[i];
+        switch (cmd.type) {
+            case COMMAND_ENTITY_SPAWN:
+                _ecs_internal_entity_spawn(ecs, cmd.entity);
+                 break;
+            case COMMAND_ENTITY_KILL:
+                _ecs_internal_kill(ecs, cmd.entity);
+                // printf("kill: %zu\n", cmd.entity);
+                 break;
+            case COMMAND_ENTITY_COMPONENT_ADD:
+                _entity_internal_add_component(ecs, cmd.entity, cmd.component_id, cmd.data);
+                free(cmd.data);
+                 break;
+            case COMMAND_ENTITY_COMPONENT_REMOVE:
+                _entity_internal_remove_component(ecs, cmd.entity, cmd.component_id);
+                 break;
+        }
+    }
+    vec_free(ecs->command_queue);
 }

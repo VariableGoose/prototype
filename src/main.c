@@ -170,9 +170,7 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         if ((projectile[i].lifespan != -1.0f &&
             projectile[i].lifespan <= 0.0f) ||
             projectile[i].penetration == 0) {
-            printf("Iter count: %zu\n", iter.count);
             Entity entity = ecs_query_iter_get_entity(iter, i);
-            printf("Projectile to kill: %zu, %u\n", entity, i);
             ecs_entity_kill(ecs, entity);
         }
     }
@@ -244,6 +242,7 @@ struct PhysicsObject {
 
 typedef struct PhysicsWorld PhysicsWorld;
 struct PhysicsWorld {
+    Query query;
     Vec(PhysicsObject) bodies;
 };
 
@@ -306,14 +305,15 @@ PhysicsWorld physics_world_init(GameState *state) {
     // TODO: Implement spatial hashing.
 
     // Pull entities out of the ecs.
-    Query query = ecs_query(state->ecs, (QueryDesc) {
+    world.query = ecs_query(state->ecs, (QueryDesc) {
             .fields = {
                 ecs_id(state->ecs, Transform),
                 ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
             },
         });
-    for (u32 i = 0; i < query.count; i++) {
-        QueryIter iter = ecs_query_get_iter(query, i);
+    for (u32 i = 0; i < world.query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(world.query, i);
         Transform *transform = ecs_query_iter_get_field(iter, 0);
         PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
         for (u32 j = 0; j < iter.count; j++) {
@@ -325,7 +325,6 @@ PhysicsWorld physics_world_init(GameState *state) {
             vec_push(world.bodies, obj);
         }
     }
-    ecs_query_free(query);
 
     return world;
 }
@@ -396,7 +395,6 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
 void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
     for (u32 i = 0; i < vec_len(world->bodies); i++) {
         PhysicsObject obj = world->bodies[i];
-        // printf("Alive: %u\n", entity_alive(state->ecs, obj.id));
         Transform *transform = entity_get_component(state->ecs, obj.id, Transform);
         PhysicsBody *body = entity_get_component(state->ecs, obj.id, PhysicsBody);
         *transform = obj.transform;
@@ -404,7 +402,8 @@ void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
     }
 }
 
-void physics_world_free(PhysicsWorld *world) {
+void physics_world_free(GameState *state, PhysicsWorld *world) {
+    ecs_query_free(state->ecs, world->query);
     vec_free(world->bodies);
 }
 
@@ -415,7 +414,6 @@ PhysicsWorld physics_world_snapshot(PhysicsWorld *world) {
 }
 
 static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
-    // printf("self: %zu, other: %zu\n", self, other);
     PlayerController *controller = entity_get_component(ecs, self, PlayerController);
     PhysicsBody *other_body = entity_get_component(ecs, other, PhysicsBody);
     if (other_body->is_static && manifold.normal.y == -1) {
@@ -426,7 +424,7 @@ static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManif
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
-    window_set_vsync(game_state.window, false);
+    window_set_vsync(game_state.window, true);
 
     Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
@@ -444,7 +442,7 @@ i32 main(void) {
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, player, PhysicsBody, {
-            .gravity_multiplier = 10.0f,
+            .gravity_multiplier = 0.0f,
             .is_static = false,
             .collider = true,
             .collision_cbs = {
@@ -479,7 +477,6 @@ i32 main(void) {
             .is_static = true,
             .collider = true,
         });
-
 
     Entity other = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, other, Transform, {
@@ -527,7 +524,7 @@ i32 main(void) {
             PhysicsWorld world = physics_world_init(&game_state);
             physics_world_step(&world, &game_state, game_state.dt_fixed);
             physics_world_update_ecs(&world, &game_state);
-            physics_world_free(&world);
+            physics_world_free(&game_state, &world);
         }
         ecs_run_group(game_state.ecs, game_state.free_group);
 
@@ -555,7 +552,7 @@ i32 main(void) {
                     }, vec2s(0.0f), r[j].texture, r[j].color);
             }
         }
-        ecs_query_free(query);
+        ecs_query_free(game_state.ecs, query);
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
