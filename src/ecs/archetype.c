@@ -163,10 +163,10 @@ static void archetype_move_entity(ECS *ecs, Archetype *current, Archetype *next,
         _vec_remove_fast(&current->storage[i], current_column, NULL);
     }
 
-    // if (entity_to_move == 420) {
-    //     ArchetypeColumn *col = hash_map_getp(ecs->entity_map, entity_to_move);
-    //     printf("It moved to %p\n", col);
-    // }
+    ArchetypeColumn *pcolumn = hash_map_getp(ecs->entity_map, entity_to_move);
+    log_trace("Moved %zu to new column: %p, %zu.", entity_to_move, pcolumn, pcolumn->index);
+    pcolumn = hash_map_getp(ecs->entity_map, last_current_entity);
+    log_trace("Swapped %zu to new column: %p, %zu.", entity_to_move, pcolumn, pcolumn->index);
 }
 
 void archetype_move_entity_right(ECS *ecs, Archetype *left, const void *component_data, ComponentId component_id, size_t left_column) {

@@ -509,7 +509,7 @@ i32 main(void) {
         fps++;
         fps_timer += game_state.dt;
         if (fps_timer >= 1.0f) {
-            printf("FPS: %u\n", fps);
+            log_info("FPS: %u", fps);
             fps = 0;
             fps_timer = 0.0f;
         }

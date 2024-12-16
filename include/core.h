@@ -58,3 +58,21 @@ static const Allocator ALLOCATOR_LIBC = {
     .realloc = realloc_stub,
     .ctx = NULL,
 };
+
+typedef enum {
+    LOG_LEVEL_FATAL,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_DEBUG,
+    LOG_LEVEL_TRACE,
+} LogLevel;
+
+extern void _log(LogLevel level, const char *file, u32 line, const char *fmt, ...);
+
+#define log_fatal(...) _log(LOG_LEVEL_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+#define log_error(...) _log(LOG_LEVEL_ERROR, __FILE__, __LINE__, __VA_ARGS__)
+#define log_warn(...) _log(LOG_LEVEL_WARN, __FILE__, __LINE__, __VA_ARGS__)
+#define log_info(...) _log(LOG_LEVEL_INFO, __FILE__, __LINE__, __VA_ARGS__)
+#define log_debug(...) _log(LOG_LEVEL_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
+#define log_trace(...) _log(LOG_LEVEL_TRACE, __FILE__, __LINE__, __VA_ARGS__)
