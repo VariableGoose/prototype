@@ -93,10 +93,8 @@ Entity ecs_entity(ECS *ecs) {
                 .type = COMMAND_ENTITY_SPAWN,
                 .entity = id,
             }));
-        log_trace("Deferred creation of %zu.", id);
     } else {
         _ecs_internal_entity_spawn(ecs, id);
-        log_trace("Created entity %zu", id);
     }
 
     return id;
@@ -109,7 +107,6 @@ static void _ecs_internal_kill(ECS *ecs, Entity entity) {
     vec_push(ecs->entity_free_list, index);
 
     HashMapIter iter = hash_map_remove(ecs->entity_map, entity);
-    log_trace("Removed %zu from entity map.", entity);
     ArchetypeColumn column = ecs->entity_map[iter].value;
     archetype_remove_entity(ecs, column.archetype, column.index);
 }
@@ -124,7 +121,6 @@ void ecs_entity_kill(ECS *ecs, Entity entity) {
                 .type = COMMAND_ENTITY_KILL,
                 .entity = entity,
             }));
-        log_trace("Deferred killing of %zu.", entity);
     } else {
         _ecs_internal_kill(ecs, entity);
     }
@@ -154,7 +150,6 @@ void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const vo
                 .component_id = component_id,
                 .data = data_copy,
             }));
-        log_trace("Deferred component (%.*s) add to %zu.", str_arg(component_name), entity);
     } else {
         _entity_internal_add_component(ecs, entity, component_id, data);
     }
@@ -180,7 +175,6 @@ void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
                 .entity = entity,
                 .component_id = component_id,
             }));
-        log_trace("Deferred component (%.*s) removal from %zu.", str_arg(component_name), entity);
     } else {
         _entity_internal_remove_component(ecs, entity, component_id);
     }
@@ -194,23 +188,6 @@ void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
     ArchetypeColumn *column = hash_map_getp(ecs->entity_map, entity);
     if (column == NULL) {
         log_error("Column retrieved is null: %zu, %u, %u", entity, (u32) entity, (u32) (entity >> 32));
-        log_debug("Hash map count: %zu", hash_map_count(ecs->entity_map));
-        log_debug("Entities in map:");
-        for (HashMapIter i = hash_map_iter_new(ecs->entity_map);
-                hash_map_iter_valid(ecs->entity_map, i);
-                i = hash_map_iter_next(ecs->entity_map, i)) {
-            u32 index = ecs->entity_map[i].key;
-            u32 gen = ecs->entity_map[i].key >> 32;
-            log_debug("    id: %zu, index: %u, gen: %u",
-                ecs->entity_map[i].key, index, gen);
-            column = hash_map_getp(ecs->entity_map, ecs->entity_map[i].key);
-            log_debug("    column: %p", column);
-        }
-        log_debug("Ids in free list:");
-        for (u32 i = 0; i < vec_len(ecs->entity_free_list); i++) {
-            log_debug("    %u", ecs->entity_free_list[i]);
-        }
-        exit(1);
     }
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
     size_t *row = hash_map_getp(column->archetype->component_lookup, component_id);
@@ -262,12 +239,6 @@ void ecs_run_system(ECS *ecs, System system, QueryDesc desc) {
 }
 
 void _ecs_process_command_queue(ECS *ecs) {
-    const char *cmd_type_str[] = {
-        "spawn",
-        "kill",
-        "component_add",
-        "component_remove",
-    };
     for (u32 i = 0; i < vec_len(ecs->command_queue); i++) {
         Command cmd = ecs->command_queue[i];
         switch (cmd.type) {
@@ -285,8 +256,6 @@ void _ecs_process_command_queue(ECS *ecs) {
                 _entity_internal_remove_component(ecs, cmd.entity, cmd.component_id);
                  break;
         }
-        log_trace("Processing command: %s, entity: %zu", cmd_type_str[cmd.type], cmd.entity);
-        log_debug("Command left in queue: %zu", vec_len(ecs->command_queue) - i - 1);
     }
     vec_free(ecs->command_queue);
 }

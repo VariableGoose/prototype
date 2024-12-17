@@ -120,34 +120,39 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         // Shooting
         controller[i].shoot_timer -= state->dt;
         if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer <= 0.0f) {
-            Entity projectile = ecs_entity(state->ecs);
-            Vec2 dir = vec2_sub(screen_to_world_space(state->cam, mouse_position(state->window)), transform[i].pos);
-            dir = vec2_normalized(dir);
-            dir = vec2_muls(dir, 10.0f);
-            entity_add_component(state->ecs, projectile, Transform, {
-                    .pos = transform[i].pos,
-                    .size = vec2s(0.25f),
-                });
-            entity_add_component(state->ecs, projectile, Renderable, {
-                    .color = color_hsv(controller[i].projectile_count*10.0f, 0.75f, 1.0f),
-                });
-            entity_add_component(state->ecs, projectile, PhysicsBody, {
-                    .gravity_multiplier = 0.0f,
-                    .velocity = dir,
-                    .collider = false,
-                    .collision_cbs = {
+            u32 projectile_count = 12;
+            f32 spread = PI/4;
+            for (u32 j = 0; j < projectile_count; j++) {
+                Entity projectile = ecs_entity(state->ecs);
+                Vec2 diff = vec2_sub(screen_to_world_space(state->cam, mouse_position(state->window)), transform[i].pos);
+                f32 angle = atan2f(diff.y, diff.x) - spread/2.0f + spread/(projectile_count-1)*j;
+                Vec2 dir = vec2(cosf(angle), sinf(angle));
+                dir = vec2_muls(dir, 10.0f);
+                entity_add_component(state->ecs, projectile, Transform, {
+                        .pos = transform[i].pos,
+                        .size = vec2s(0.25f),
+                    });
+                entity_add_component(state->ecs, projectile, Renderable, {
+                        .color = color_hsv(360.0f/projectile_count*j + controller[i].projectile_count*10.0f, 0.75f, 1.0f),
+                    });
+                entity_add_component(state->ecs, projectile, PhysicsBody, {
+                        .gravity_multiplier = 0.0f,
+                        .velocity = dir,
+                        .collider = false,
+                        .collision_cbs = {
                         projectile_collision
-                    },
-                });
+                        },
+                    });
 
-            entity_add_component(state->ecs, projectile, Projectile, {
-                    .penetration = 1,
-                    .lifespan = 1.0f,
-                    .friendly = true,
-                    .env_collide = false,
-                });
+                entity_add_component(state->ecs, projectile, Projectile, {
+                        .penetration = 1,
+                        .lifespan = 1.0f,
+                        .friendly = true,
+                        .env_collide = false,
+                        });
+            }
 
-            controller[i].projectile_count++;
+            controller[i].projectile_count += 1.0f;
             controller[i].shoot_timer = controller[i].shoot_delay;
         }
 
@@ -163,10 +168,6 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     for (u32 i = 0; i < iter.count; i++) {
         projectile[i].lifespan -= state->dt_fixed;
 
-        // BUG: Because we're killing the entities everything get's moved
-        // around and things are no longer valid becaues of it. Either a
-        // buffering solution needs to be implemented or some other way to work
-        // around it.
         if ((projectile[i].lifespan != -1.0f &&
             projectile[i].lifespan <= 0.0f) ||
             projectile[i].penetration == 0) {
@@ -435,14 +436,14 @@ i32 main(void) {
         });
     entity_add_component(game_state.ecs, player, PlayerController, {
             .speed = 10.0f,
-            .shoot_delay = 0.f,
+            .shoot_delay = 0.1f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
             .color = COLOR_WHITE,
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, player, PhysicsBody, {
-            .gravity_multiplier = 0.0f,
+            .gravity_multiplier = 10.0f,
             .is_static = false,
             .collider = true,
             .collision_cbs = {
@@ -466,7 +467,7 @@ i32 main(void) {
 
     Entity platform2 = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, platform2, Transform, {
-            .pos = vec2(5.5f, -4.0f),
+            .pos = vec2(5.5f, -3.0f),
             .size = vec2(1.0f, 1.0f),
         });
     entity_add_component(game_state.ecs, platform2, Renderable, {
@@ -492,7 +493,7 @@ i32 main(void) {
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, other, Projectile, {
-            .lifespan = 1.0f,
+            .lifespan = -1.0f,
             .penetration = 1,
         });
 
@@ -513,6 +514,8 @@ i32 main(void) {
             fps = 0;
             fps_timer = 0.0f;
         }
+
+        game_state.cam.screen_size = window_get_size(game_state.window);
 
         // Game logic
         last_time_step += game_state.dt;
@@ -568,6 +571,9 @@ i32 main(void) {
         renderer_begin(game_state.renderer, screen_cam);
 
         renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
+
+        // Transform *player_transform = entity_get_component(game_state.ecs, player, Transform);
+        // renderer_draw_string(game_state.renderer, str_lit("Player"), font, 32.0f, ivec2(vec2_arg(world_to_screen_space(game_state.cam, player_transform->pos))), COLOR_WHITE);
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
