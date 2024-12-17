@@ -5,12 +5,14 @@
 #include "window.h"
 #include "ds.h"
 #include <math.h>
+#include <stdint.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct GameState GameState;
 struct GameState {
@@ -120,16 +122,18 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         // Shooting
         controller[i].shoot_timer -= state->dt;
         if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer <= 0.0f) {
-            u32 projectile_count = 12;
-            f32 spread = PI/4;
+            u32 projectile_count = 36;
+            f32 spread = 2*PI;
             for (u32 j = 0; j < projectile_count; j++) {
                 Entity projectile = ecs_entity(state->ecs);
                 Vec2 diff = vec2_sub(screen_to_world_space(state->cam, mouse_position(state->window)), transform[i].pos);
                 f32 angle = atan2f(diff.y, diff.x) - spread/2.0f + spread/(projectile_count-1)*j;
                 Vec2 dir = vec2(cosf(angle), sinf(angle));
+                Vec2 pos = transform[i].pos;
+                pos = vec2_add(pos, vec2_muls(dir, 1.0f));
                 dir = vec2_muls(dir, 10.0f);
                 entity_add_component(state->ecs, projectile, Transform, {
-                        .pos = transform[i].pos,
+                        .pos = pos,
                         .size = vec2s(0.25f),
                     });
                 entity_add_component(state->ecs, projectile, Renderable, {
@@ -138,7 +142,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                 entity_add_component(state->ecs, projectile, PhysicsBody, {
                         .gravity_multiplier = 0.0f,
                         .velocity = dir,
-                        .collider = false,
+                        .collider = true,
                         .collision_cbs = {
                         projectile_collision
                         },
@@ -241,10 +245,18 @@ struct PhysicsObject {
     PhysicsBody body;
 };
 
+typedef struct Cell Cell;
+struct Cell {
+    Vec(PhysicsObject) objs;
+};
+
 typedef struct PhysicsWorld PhysicsWorld;
 struct PhysicsWorld {
     Query query;
-    Vec(PhysicsObject) bodies;
+
+    u32 cell_count;
+    Vec2 cell_size;
+    Cell *cells;
 };
 
 static CollisionManifold colliding(Transform a, Transform b) {
@@ -300,10 +312,22 @@ static CollisionManifold colliding(Transform a, Transform b) {
     return manifold;
 }
 
-PhysicsWorld physics_world_init(GameState *state) {
-    PhysicsWorld world = {0};
+// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+static u64 hash_coord(i32 x, i32 y) {
+    u64 hash = x & ((u64) y << 32);
+    hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9UL;
+    hash = (hash ^ (hash >> 27)) * 0x94d049bb133111ebUL;
+    hash = hash ^ (hash >> 31);
+    return hash;
+}
 
-    // TODO: Implement spatial hashing.
+PhysicsWorld physics_world_init(GameState *state) {
+    u32 cell_count = 4096;
+    PhysicsWorld world = {
+        .cells = calloc(cell_count, sizeof(Cell)),
+        .cell_count = cell_count,
+        .cell_size = vec2s(5.0f),
+    };
 
     // Pull entities out of the ecs.
     world.query = ecs_query(state->ecs, (QueryDesc) {
@@ -323,7 +347,24 @@ PhysicsWorld physics_world_init(GameState *state) {
                 .transform = transform[j],
                 .body = body[j],
             };
-            vec_push(world.bodies, obj);
+
+            Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
+            Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
+            Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
+
+            obj_sw = vec2_div(obj_sw, world.cell_size);
+            obj_ne = vec2_div(obj_ne, world.cell_size);
+
+            Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
+            Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
+
+            for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
+                for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
+                    u64 hash = hash_coord(x, y);
+                    u32 index = hash % world.cell_count;
+                    vec_push(world.cells[index].objs, obj);
+                }
+            }
         }
     }
 
@@ -331,87 +372,91 @@ PhysicsWorld physics_world_init(GameState *state) {
 }
 
 void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
-    for (u32 i = 0; i < vec_len(world->bodies); i++) {
-        PhysicsObject *obj = &world->bodies[i];
-        if (obj->body.is_static) {
-            continue;
+    for (u32 i = 0; i < world->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
+            PhysicsObject *obj = &world->cells[i].objs[j];
+            if (obj->body.is_static) {
+                continue;
+            }
+            obj->body.velocity.y += state->gravity*obj->body.gravity_multiplier*dt;
+            obj->transform.pos = vec2_add(obj->transform.pos, vec2_muls(obj->body.velocity, dt));
         }
-        obj->body.velocity.y += state->gravity*obj->body.gravity_multiplier*dt;
-        obj->transform.pos = vec2_add(obj->transform.pos, vec2_muls(obj->body.velocity, dt));
     }
 
-    for (u32 i = 0; i < vec_len(world->bodies); i++) {
-        for (u32 j = 0; j < vec_len(world->bodies); j++) {
-            if (i == j) {
-                continue;
-            }
+    // Collision detection.
+    for (u32 i = 0; i < world->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
+            for (u32 k = 0; k < vec_len(world->cells[i].objs); k++) {
+                if (j == k) {
+                    continue;
+                }
 
-            PhysicsObject *a = &world->bodies[i];
-            PhysicsObject *b = &world->bodies[j];
+                PhysicsObject *a = &world->cells[i].objs[j];
+                PhysicsObject *b = &world->cells[i].objs[k];
 
-            if (a->body.is_static) {
-                continue;
-            }
+                if (a->body.is_static) {
+                    continue;
+                }
 
-            CollisionManifold manifold = colliding(a->transform, b->transform);
-            if (!manifold.is_colliding) {
-                continue;
-            }
+                CollisionManifold manifold = colliding(a->transform, b->transform);
+                if (!manifold.is_colliding) {
+                    continue;
+                }
 
-            if (b->body.is_static && b->body.collider && a->body.collider) {
-                if (manifold.normal.x != 0.0f) {
-                    a->transform.pos.x -= manifold.depth.x;
-                    if (manifold.normal.x > 0.0f && a->body.velocity.x > 0.0f) {
-                        a->body.velocity.x = 0.0f;
-                    } else if (manifold.normal.x < 0.0f && a->body.velocity.x < 0.0f) {
-                        a->body.velocity.x = 0.0f;
+                if (b->body.is_static && b->body.collider && a->body.collider) {
+                    if (manifold.normal.x != 0.0f) {
+                        a->transform.pos.x -= manifold.depth.x;
+                        if (manifold.normal.x > 0.0f && a->body.velocity.x > 0.0f) {
+                            a->body.velocity.x = 0.0f;
+                        } else if (manifold.normal.x < 0.0f && a->body.velocity.x < 0.0f) {
+                            a->body.velocity.x = 0.0f;
+                        }
+                    } else {
+                        a->transform.pos.y -= manifold.depth.y;
+                        if (manifold.normal.y > 0.0f && a->body.velocity.y > 0.0f) {
+                            a->body.velocity.y = 0.0f;
+                        } else if (manifold.normal.y < 0.0f && a->body.velocity.y < 0.0f) {
+                            a->body.velocity.y = 0.0f;
+                        }
                     }
-                } else {
-                    a->transform.pos.y -= manifold.depth.y;
-                    if (manifold.normal.y > 0.0f && a->body.velocity.y > 0.0f) {
-                        a->body.velocity.y = 0.0f;
-                    } else if (manifold.normal.y < 0.0f && a->body.velocity.y < 0.0f) {
-                        a->body.velocity.y = 0.0f;
+                }
+
+                for (u32 l = 0; l < arrlen(a->body.collision_cbs); l++) {
+                    if (a->body.collision_cbs[l] == NULL) {
+                        break;
                     }
+                    a->body.collision_cbs[l](state->ecs, a->id, b->id, manifold);
                 }
-            }
 
-            for (u32 i = 0; i < arrlen(a->body.collision_cbs); i++) {
-                if (a->body.collision_cbs[i] == NULL) {
-                    break;
+                for (u32 l = 0; l < arrlen(b->body.collision_cbs); l++) {
+                    if (b->body.collision_cbs[l] == NULL) {
+                        break;
+                    }
+                    b->body.collision_cbs[l](state->ecs, b->id, a->id, manifold);
                 }
-                a->body.collision_cbs[i](state->ecs, a->id, b->id, manifold);
-            }
-
-            for (u32 i = 0; i < arrlen(b->body.collision_cbs); i++) {
-                if (b->body.collision_cbs[i] == NULL) {
-                    break;
-                }
-                b->body.collision_cbs[i](state->ecs, b->id, a->id, manifold);
             }
         }
     }
 }
 
 void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
-    for (u32 i = 0; i < vec_len(world->bodies); i++) {
-        PhysicsObject obj = world->bodies[i];
-        Transform *transform = entity_get_component(state->ecs, obj.id, Transform);
-        PhysicsBody *body = entity_get_component(state->ecs, obj.id, PhysicsBody);
-        *transform = obj.transform;
-        *body = obj.body;
+    for (u32 i = 0; i < world->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
+            PhysicsObject obj = world->cells[i].objs[j];
+            Transform *transform = entity_get_component(state->ecs, obj.id, Transform);
+            PhysicsBody *body = entity_get_component(state->ecs, obj.id, PhysicsBody);
+            *transform = obj.transform;
+            *body = obj.body;
+        }
     }
 }
 
 void physics_world_free(GameState *state, PhysicsWorld *world) {
     ecs_query_free(state->ecs, world->query);
-    vec_free(world->bodies);
-}
-
-PhysicsWorld physics_world_snapshot(PhysicsWorld *world) {
-    PhysicsWorld snapshot = {0};
-    vec_insert_arr(snapshot.bodies, 0, world->bodies, vec_len(world->bodies));
-    return snapshot;
+    for (u32 i = 0; i < world->cell_count; i++) {
+        vec_free(world->cells[i].objs);
+    }
+    free(world->cells);
 }
 
 static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
@@ -425,7 +470,7 @@ static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManif
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
-    window_set_vsync(game_state.window, true);
+    window_set_vsync(game_state.window, false);
 
     Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
@@ -557,6 +602,32 @@ i32 main(void) {
         }
         ecs_query_free(game_state.ecs, query);
 
+        // Visualize spatial partition
+        {
+            PhysicsObject obj = {
+                .transform = *(Transform *) entity_get_component(game_state.ecs, player, Transform),
+            };
+            Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
+            Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
+            Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
+
+            Vec2 cell_size = vec2s(5.0f);
+            obj_sw = vec2_div(obj_sw, cell_size);
+            obj_ne = vec2_div(obj_ne, cell_size);
+
+            Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
+            Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
+
+            for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
+                for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
+                    renderer_draw_quad(game_state.renderer, (Quad) {
+                            .pos = vec2_mul(vec2(x, y), cell_size),
+                            .size = cell_size,
+                        }, vec2s(0.0f), TEXTURE_NULL, color_rgba_hex(0xffffff80));
+                }
+            }
+        }
+
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
 
@@ -571,9 +642,6 @@ i32 main(void) {
         renderer_begin(game_state.renderer, screen_cam);
 
         renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
-
-        // Transform *player_transform = entity_get_component(game_state.ecs, player, Transform);
-        // renderer_draw_string(game_state.renderer, str_lit("Player"), font, 32.0f, ivec2(vec2_arg(world_to_screen_space(game_state.cam, player_transform->pos))), COLOR_WHITE);
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
