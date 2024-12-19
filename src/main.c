@@ -79,6 +79,12 @@ struct Projectile {
 // -----------------------------------------------------------------------------
 
 static void projectile_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
+    (void) manifold;
+    Projectile *proj = entity_get_component(ecs, self, Projectile);
+    PhysicsBody *other_body = entity_get_component(ecs, other, PhysicsBody);
+    if (proj->env_collide && other_body->is_static && other_body->collider) {
+        ecs_entity_kill(ecs, self);
+    }
 }
 
 // -- Systems ------------------------------------------------------------------
@@ -152,8 +158,8 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                         .penetration = 1,
                         .lifespan = 1.0f,
                         .friendly = true,
-                        .env_collide = false,
-                        });
+                        .env_collide = true,
+                    });
             }
 
             controller[i].projectile_count += 1.0f;
@@ -603,30 +609,30 @@ i32 main(void) {
         ecs_query_free(game_state.ecs, query);
 
         // Visualize spatial partition
-        {
-            PhysicsObject obj = {
-                .transform = *(Transform *) entity_get_component(game_state.ecs, player, Transform),
-            };
-            Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
-            Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
-            Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
-
-            Vec2 cell_size = vec2s(5.0f);
-            obj_sw = vec2_div(obj_sw, cell_size);
-            obj_ne = vec2_div(obj_ne, cell_size);
-
-            Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
-            Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
-
-            for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
-                for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
-                    renderer_draw_quad(game_state.renderer, (Quad) {
-                            .pos = vec2_mul(vec2(x, y), cell_size),
-                            .size = cell_size,
-                        }, vec2s(0.0f), TEXTURE_NULL, color_rgba_hex(0xffffff80));
-                }
-            }
-        }
+        // {
+        //     PhysicsObject obj = {
+        //         .transform = *(Transform *) entity_get_component(game_state.ecs, player, Transform),
+        //     };
+        //     Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
+        //     Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
+        //     Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
+        //
+        //     Vec2 cell_size = vec2s(5.0f);
+        //     obj_sw = vec2_div(obj_sw, cell_size);
+        //     obj_ne = vec2_div(obj_ne, cell_size);
+        //
+        //     Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
+        //     Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
+        //
+        //     for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
+        //         for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
+        //             renderer_draw_quad(game_state.renderer, (Quad) {
+        //                     .pos = vec2_mul(vec2(x, y), cell_size),
+        //                     .size = cell_size,
+        //                 }, vec2s(0.0f), TEXTURE_NULL, color_rgba_hex(0xffffff80));
+        //         }
+        //     }
+        // }
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);

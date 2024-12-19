@@ -101,6 +101,10 @@ Entity ecs_entity(ECS *ecs) {
 }
 
 static void _ecs_internal_kill(ECS *ecs, Entity entity) {
+    if (!entity_alive(ecs, entity)) {
+        return;
+    }
+
     uint32_t index = entity;
 
     ecs->entity_generation[index]++;
@@ -112,6 +116,10 @@ static void _ecs_internal_kill(ECS *ecs, Entity entity) {
 }
 
 void ecs_entity_kill(ECS *ecs, Entity entity) {
+    if (!entity_alive(ecs, entity)) {
+        return;
+    }
+
     uint32_t index = entity;
     uint32_t generation = entity >> 32;
     assert(ecs->entity_generation[index] == generation);
