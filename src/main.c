@@ -11,8 +11,29 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
-#include <stdio.h>
 #include <stdlib.h>
+
+typedef enum {
+    TILE_NONE,
+    TILE_GROUND,
+
+    TILE_TYPE_COUNT,
+} TileType;
+
+typedef struct Tile Tile;
+struct Tile {
+    TileType type;
+    Color color;
+};
+
+#define WORLD_WIDTH 80
+#define WORLD_HEIGHT 128
+
+typedef struct DebugDraw DebugDraw;
+struct DebugDraw {
+    Quad quad;
+    Color color;
+};
 
 typedef struct GameState GameState;
 struct GameState {
@@ -26,7 +47,40 @@ struct GameState {
 
     SystemGroup free_group;
     SystemGroup fixed_group;
+
+    Tile tiles[WORLD_WIDTH*WORLD_HEIGHT];
+
+    DebugDraw debug_draw[1024];
+    u32 debug_draw_i;
 };
+
+Tile get_tile(GameState *state, Vec2 pos) {
+    Ivec2 idx = ivec2(roundf(pos.x), roundf(pos.y));
+    if (idx.x < 0 || idx.y < 0 || idx.x >= WORLD_WIDTH || idx.y >= WORLD_HEIGHT) {
+        // log_warn("Indexing out of world bounds.");
+        return (Tile) {0};
+    }
+    return state->tiles[idx.x+idx.y*WORLD_WIDTH];
+}
+
+Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator allocator, Ivec2 *area) {
+    Vec2 bl = vec2_sub(center, half_size);
+    Vec2 tr = vec2_add(center, half_size);
+
+    Ivec2 bl_idx = ivec2(roundf(bl.x), roundf(bl.y));
+    Ivec2 tr_idx = ivec2(roundf(tr.x), roundf(tr.y));
+
+    *area = ivec2_sub(tr_idx, bl_idx);
+    Tile *tiles = allocator.alloc(area->x*area->y*sizeof(Tile), allocator.ctx);
+
+    for (i32 y = 0; y < area->y; y++) {
+        for (i32 x = 0; x < area->x; x++) {
+            tiles[x+y*area->x] = get_tile(state, vec2(bl_idx.x+x, bl_idx.y+y));
+        }
+    }
+
+    return tiles;
+}
 
 // -- Components ---------------------------------------------------------------
 
@@ -38,11 +92,15 @@ struct Transform {
 
 typedef struct PlayerController PlayerController;
 struct PlayerController {
-    f32 speed;
+    struct {
+        f32 horizontal;
+        b8 jumping;
+        b8 jump_cancel;
+    } input;
+    f32 max_horizontal_speed;
+    f32 acceleration;
+    f32 deceleration;
     b8 grounded;
-    f32 shoot_timer;
-    f32 shoot_delay;
-    i32 projectile_count;
 };
 
 typedef struct Renderable Renderable;
@@ -62,6 +120,7 @@ typedef void (*CollisionCallback)(ECS *ecs, Entity self, Entity other, Collision
 typedef struct PhysicsBody PhysicsBody;
 struct PhysicsBody {
     f32 gravity_multiplier;
+    Vec2 acceleration;
     Vec2 velocity;
     b8 is_static;
     b8 collider;
@@ -98,6 +157,24 @@ void template_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     }
 }
 
+void player_input_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
+
+    PlayerController *controller = ecs_query_iter_get_field(iter, 0);
+    for (u32 i = 0; i < iter.count; i++) {
+        controller[i].input.horizontal = 0.0f;
+        controller[i].input.horizontal -= key_down(state->window, KEY_A);
+        controller[i].input.horizontal += key_down(state->window, KEY_D);
+
+        controller[i].input.jumping = key_down(state->window, KEY_SPACE);
+
+        if (key_release(state->window, KEY_SPACE)) {
+            controller[i].input.jump_cancel = true;
+        }
+    }
+}
+
 void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
     GameState *state = user_ptr;
@@ -106,67 +183,42 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
-        body[i].velocity.x = 0.0f;
-        body[i].velocity.x -= key_down(state->window, KEY_A);
-        body[i].velocity.x += key_down(state->window, KEY_D);
-        body[i].velocity.x *= controller[i].speed;
+        Vec2 under_player = transform->pos;
+        under_player.y -= transform->size.y;
+        for (i32 x = -1; x < 2; x++) {
+            under_player.x = transform->pos.x + x;
+            controller->grounded = get_tile(state, under_player).type != TILE_NONE;
+            if (controller->grounded) {
+                break;
+            }
+        }
 
-        if (key_down(state->window, KEY_SPACE) && controller[i].grounded && body[i].velocity.y <= 0.0f) {
+        body[i].velocity.x = controller[i].input.horizontal*controller[i].max_horizontal_speed;
+        // if (controller[i].input.horizontal != 0.0f) {
+        //     f32 curr_vel = body[i].velocity.x;
+        //     f32 target_vel = controller[i].input.horizontal*controller[i].max_horizontal_speed;
+        //     f32 delta = target_vel - curr_vel;
+        //     f32 acc = delta * controller[i].acceleration;
+        //     body[i].velocity.x += acc*state->dt_fixed;
+        // } else {
+        //     f32 dec = -sign(body[i].velocity.x)*controller[i].deceleration;;
+        //     body[i].velocity.x += dec*state->dt_fixed;
+        // }
+
+        if (controller[i].input.jumping && controller[i].grounded) {
             body[i].velocity.y = 30.0f;
             controller[i].grounded = false;
         }
 
-        if (key_release(state->window, KEY_SPACE) && body[i].velocity.y > 0.0f) {
-            body[i].velocity.y /= 2.0f;
-        }
+        // if (controller[i].input.jump_cancel && body[i].velocity.y > 0.0f) {
+        //     controller[i].input.jump_cancel = false;
+        //     body[i].velocity.y /= 2.0f;
+        // }
 
-        if (transform[i].pos.y < -25.0f) {
-            transform[i].pos = vec2(0.0f, 5.0f);
+        if (transform[i].pos.y <= 0.0f) {
+            transform[i].pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f);
             body[i].velocity = vec2s(0.0f);
         }
-
-        // Shooting
-        controller[i].shoot_timer -= state->dt;
-        if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer <= 0.0f) {
-            u32 projectile_count = 36;
-            f32 spread = 2*PI;
-            for (u32 j = 0; j < projectile_count; j++) {
-                Entity projectile = ecs_entity(state->ecs);
-                Vec2 diff = vec2_sub(screen_to_world_space(state->cam, mouse_position(state->window)), transform[i].pos);
-                f32 angle = atan2f(diff.y, diff.x) - spread/2.0f + spread/(projectile_count-1)*j;
-                Vec2 dir = vec2(cosf(angle), sinf(angle));
-                Vec2 pos = transform[i].pos;
-                pos = vec2_add(pos, vec2_muls(dir, 1.0f));
-                dir = vec2_muls(dir, 10.0f);
-                entity_add_component(state->ecs, projectile, Transform, {
-                        .pos = pos,
-                        .size = vec2s(0.25f),
-                    });
-                entity_add_component(state->ecs, projectile, Renderable, {
-                        .color = color_hsv(360.0f/projectile_count*j + controller[i].projectile_count*10.0f, 0.75f, 1.0f),
-                    });
-                entity_add_component(state->ecs, projectile, PhysicsBody, {
-                        .gravity_multiplier = 0.0f,
-                        .velocity = dir,
-                        .collider = true,
-                        .collision_cbs = {
-                        projectile_collision
-                        },
-                    });
-
-                entity_add_component(state->ecs, projectile, Projectile, {
-                        .penetration = 1,
-                        .lifespan = 1.0f,
-                        .friendly = true,
-                        .env_collide = true,
-                    });
-            }
-
-            controller[i].projectile_count += 1.0f;
-            controller[i].shoot_timer = controller[i].shoot_delay;
-        }
-
-        state->cam.position = transform[i].pos;
     }
 }
 
@@ -184,6 +236,17 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             Entity entity = ecs_query_iter_get_entity(iter, i);
             ecs_entity_kill(ecs, entity);
         }
+    }
+}
+
+void camera_follow_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
+
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    for (u32 i = 0; i < iter.count; i++) {
+        // state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt);
+        state->cam.position = transform->pos;
     }
 }
 
@@ -225,7 +288,14 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, PhysicsBody);
     ecs_register_component(state->ecs, Projectile);
 
-    ecs_register_system(state->ecs, player_control_system, state->free_group, (QueryDesc) {
+    ecs_register_system(state->ecs, player_input_system, state->free_group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, PlayerController),
+                QUERY_FIELDS_END,
+            },
+        });
+    ecs_register_system(state->ecs, player_control_system, state->fixed_group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, PlayerController),
@@ -242,6 +312,25 @@ void setup_ecs(GameState *state) {
                 QUERY_FIELDS_END,
             },
         });
+
+    ecs_register_system(state->ecs, camera_follow_system, state->free_group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Transform),
+                [1] = ecs_id(state->ecs, PlayerController),
+                QUERY_FIELDS_END,
+            },
+        });
+}
+
+void setup_world(GameState *state) {
+    for (u32 x = 0; x < WORLD_WIDTH; x++) {
+        u32 y = (sinf(rad(x))+1.0f)*5.0f;
+        state->tiles[x+y*WORLD_WIDTH] = (Tile) {
+            .type = TILE_GROUND,
+            .color = color_hsv(x*10.0f, 0.75f, 0.5f),
+        };
+    }
 }
 
 typedef struct PhysicsObject PhysicsObject;
@@ -384,65 +473,123 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
             if (obj->body.is_static) {
                 continue;
             }
-            obj->body.velocity.y += state->gravity*obj->body.gravity_multiplier*dt;
+            obj->body.acceleration.y += state->gravity*obj->body.gravity_multiplier;
+            obj->body.velocity = vec2_add(obj->body.velocity, vec2_muls(obj->body.acceleration, dt));
             obj->transform.pos = vec2_add(obj->transform.pos, vec2_muls(obj->body.velocity, dt));
+            obj->body.acceleration = vec2s(0.0f);
+        }
+    }
+
+    for (u32 i = 0; i < world->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
+            PhysicsObject *obj = &world->cells[i].objs[j];
+            if (obj->body.is_static) {
+                continue;
+            }
+
+            Ivec2 area;
+            Tile *tiles = get_tiles_in_rect(state, obj->transform.pos, vec2_adds(obj->transform.size, 1.0f), ALLOCATOR_LIBC, &area);
+            for (i32 y = 0; y < area.y; y++) {
+                for (i32 x = 0; x < area.x; x++) {
+                    if (tiles[x+y*area.x].type == TILE_NONE) {
+                        continue;
+                    }
+
+                    Vec2 pos = obj->transform.pos;
+                    pos.x = roundf(pos.x) - area.x / 2.0f + x;
+                    pos.y = roundf(pos.y) - area.y / 2.0f + y;
+                    Transform tile_transform = {
+                        .pos = pos,
+                        .size = vec2s(1.0f),
+                    };
+
+                    CollisionManifold manifold = colliding(obj->transform, tile_transform);
+                    if (manifold.is_colliding) {
+                        state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                            .quad = {
+                                .pos = tile_transform.pos,
+                                .size = tile_transform.size,
+                            },
+                                .color = COLOR_RED,
+                        };
+
+                        log_debug("(%f, %f)", vec2_arg(manifold.normal));
+                        if (manifold.normal.x != 0.0f) {
+                            obj->transform.pos.x -= manifold.depth.x;
+                            if (manifold.normal.x > 0.0f && obj->body.velocity.x > 0.0f) {
+                                obj->body.velocity.x = 0.0f;
+                            } else if (manifold.normal.x < 0.0f && obj->body.velocity.x < 0.0f) {
+                                obj->body.velocity.x = 0.0f;
+                            }
+                        } else {
+                            obj->transform.pos.y -= manifold.depth.y;
+                            if (manifold.normal.y > 0.0f && obj->body.velocity.y > 0.0f) {
+                                obj->body.velocity.y = 0.0f;
+                            } else if (manifold.normal.y < 0.0f && obj->body.velocity.y < 0.0f) {
+                                obj->body.velocity.y = 0.0f;
+                            }
+                        }
+                    }
+                }
+            }
+            free(tiles);
         }
     }
 
     // Collision detection.
-    for (u32 i = 0; i < world->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
-            for (u32 k = 0; k < vec_len(world->cells[i].objs); k++) {
-                if (j == k) {
-                    continue;
-                }
-
-                PhysicsObject *a = &world->cells[i].objs[j];
-                PhysicsObject *b = &world->cells[i].objs[k];
-
-                if (a->body.is_static) {
-                    continue;
-                }
-
-                CollisionManifold manifold = colliding(a->transform, b->transform);
-                if (!manifold.is_colliding) {
-                    continue;
-                }
-
-                if (b->body.is_static && b->body.collider && a->body.collider) {
-                    if (manifold.normal.x != 0.0f) {
-                        a->transform.pos.x -= manifold.depth.x;
-                        if (manifold.normal.x > 0.0f && a->body.velocity.x > 0.0f) {
-                            a->body.velocity.x = 0.0f;
-                        } else if (manifold.normal.x < 0.0f && a->body.velocity.x < 0.0f) {
-                            a->body.velocity.x = 0.0f;
-                        }
-                    } else {
-                        a->transform.pos.y -= manifold.depth.y;
-                        if (manifold.normal.y > 0.0f && a->body.velocity.y > 0.0f) {
-                            a->body.velocity.y = 0.0f;
-                        } else if (manifold.normal.y < 0.0f && a->body.velocity.y < 0.0f) {
-                            a->body.velocity.y = 0.0f;
-                        }
-                    }
-                }
-
-                for (u32 l = 0; l < arrlen(a->body.collision_cbs); l++) {
-                    if (a->body.collision_cbs[l] == NULL) {
-                        break;
-                    }
-                    a->body.collision_cbs[l](state->ecs, a->id, b->id, manifold);
-                }
-
-                for (u32 l = 0; l < arrlen(b->body.collision_cbs); l++) {
-                    if (b->body.collision_cbs[l] == NULL) {
-                        break;
-                    }
-                    b->body.collision_cbs[l](state->ecs, b->id, a->id, manifold);
-                }
-            }
-        }
-    }
+    // for (u32 i = 0; i < world->cell_count; i++) {
+    //     for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
+    //         for (u32 k = 0; k < vec_len(world->cells[i].objs); k++) {
+    //             if (j == k) {
+    //                 continue;
+    //             }
+    //
+    //             PhysicsObject *a = &world->cells[i].objs[j];
+    //             PhysicsObject *b = &world->cells[i].objs[k];
+    //
+    //             if (a->body.is_static) {
+    //                 continue;
+    //             }
+    //
+    //             CollisionManifold manifold = colliding(a->transform, b->transform);
+    //             if (!manifold.is_colliding) {
+    //                 continue;
+    //             }
+    //
+    //             if (b->body.is_static && b->body.collider && a->body.collider) {
+    //                 if (manifold.normal.x != 0.0f) {
+    //                     a->transform.pos.x -= manifold.depth.x;
+    //                     if (manifold.normal.x > 0.0f && a->body.velocity.x > 0.0f) {
+    //                         a->body.velocity.x = 0.0f;
+    //                     } else if (manifold.normal.x < 0.0f && a->body.velocity.x < 0.0f) {
+    //                         a->body.velocity.x = 0.0f;
+    //                     }
+    //                 } else {
+    //                     a->transform.pos.y -= manifold.depth.y;
+    //                     if (manifold.normal.y > 0.0f && a->body.velocity.y > 0.0f) {
+    //                         a->body.velocity.y = 0.0f;
+    //                     } else if (manifold.normal.y < 0.0f && a->body.velocity.y < 0.0f) {
+    //                         a->body.velocity.y = 0.0f;
+    //                     }
+    //                 }
+    //             }
+    //
+    //             for (u32 l = 0; l < arrlen(a->body.collision_cbs); l++) {
+    //                 if (a->body.collision_cbs[l] == NULL) {
+    //                     break;
+    //                 }
+    //                 a->body.collision_cbs[l](state->ecs, a->id, b->id, manifold);
+    //             }
+    //
+    //             for (u32 l = 0; l < arrlen(b->body.collision_cbs); l++) {
+    //                 if (b->body.collision_cbs[l] == NULL) {
+    //                     break;
+    //                 }
+    //                 b->body.collision_cbs[l](state->ecs, b->id, a->id, manifold);
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
@@ -476,21 +623,23 @@ static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManif
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
+    setup_world(&game_state);
     window_set_vsync(game_state.window, false);
 
     Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
     Entity player = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, player, Transform, {
-            .pos = vec2s(0.0f),
+            .pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
             .size = vec2s(1.0f),
         });
     entity_add_component(game_state.ecs, player, PlayerController, {
-            .speed = 10.0f,
-            .shoot_delay = 0.1f,
+            .acceleration = 5.0f,
+            .deceleration = 40.0f,
+            .max_horizontal_speed = 15.0f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
-            .color = COLOR_WHITE,
+            .color = color_hsv(0.0f, 0.75f, 1.0f),
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, player, PhysicsBody, {
@@ -500,52 +649,6 @@ i32 main(void) {
             .collision_cbs = {
                 player_collision
             },
-        });
-
-    Entity platform = ecs_entity(game_state.ecs);
-    entity_add_component(game_state.ecs, platform, Transform, {
-            .pos = vec2(0.0f, -4.0f),
-            .size = vec2(10.0f, 1.0f),
-        });
-    entity_add_component(game_state.ecs, platform, Renderable, {
-            .color = color_rgb_hex(0x212121),
-            .texture = TEXTURE_NULL,
-        });
-    entity_add_component(game_state.ecs, platform, PhysicsBody, {
-            .is_static = true,
-            .collider = true,
-        });
-
-    Entity platform2 = ecs_entity(game_state.ecs);
-    entity_add_component(game_state.ecs, platform2, Transform, {
-            .pos = vec2(5.5f, -3.0f),
-            .size = vec2(1.0f, 1.0f),
-        });
-    entity_add_component(game_state.ecs, platform2, Renderable, {
-            .color = color_rgb_hex(0x212121),
-            .texture = TEXTURE_NULL,
-        });
-    entity_add_component(game_state.ecs, platform2, PhysicsBody, {
-            .is_static = true,
-            .collider = true,
-        });
-
-    Entity other = ecs_entity(game_state.ecs);
-    entity_add_component(game_state.ecs, other, Transform, {
-            .pos = vec2(0.0f, 0.0f),
-            .size = vec2(1.0f, 1.0f),
-        });
-    entity_add_component(game_state.ecs, other, PhysicsBody, {
-            .is_static = true,
-            .collider = true,
-        });
-    entity_add_component(game_state.ecs, other, Renderable, {
-            .color = color_rgb_hex(0xff00ff),
-            .texture = TEXTURE_NULL,
-        });
-    entity_add_component(game_state.ecs, other, Projectile, {
-            .lifespan = -1.0f,
-            .penetration = 1,
         });
 
     u32 fps = 0;
@@ -575,6 +678,8 @@ i32 main(void) {
                 i++, last_time_step -= game_state.dt_fixed) {
             ecs_run_group(game_state.ecs, game_state.fixed_group);
 
+            game_state.debug_draw_i = 0;
+
             PhysicsWorld world = physics_world_init(&game_state);
             physics_world_step(&world, &game_state, game_state.dt_fixed);
             physics_world_update_ecs(&world, &game_state);
@@ -586,6 +691,25 @@ i32 main(void) {
         glClearColor(color_arg(COLOR_BLACK));
         glClear(GL_COLOR_BUFFER_BIT);
         renderer_begin(game_state.renderer, game_state.cam);
+
+        for (u32 y = 0; y < WORLD_HEIGHT; y++) {
+            for (u32 x = 0; x < WORLD_WIDTH; x++) {
+                Tile tile = game_state.tiles[x+y*WORLD_WIDTH];
+                switch (tile.type) {
+                    case TILE_NONE:
+                        break;
+
+                    case TILE_GROUND:
+                        renderer_draw_quad(game_state.renderer, (Quad) {
+                                .pos = vec2(x, y),
+                                .size = vec2s(1.0f),
+                            }, vec2s(0.0f), TEXTURE_NULL, tile.color);
+
+                    case TILE_TYPE_COUNT:
+                        break;
+                }
+            }
+        }
 
         Query query = ecs_query(game_state.ecs, (QueryDesc) {
                 .fields = {
@@ -608,31 +732,14 @@ i32 main(void) {
         }
         ecs_query_free(game_state.ecs, query);
 
-        // Visualize spatial partition
-        // {
-        //     PhysicsObject obj = {
-        //         .transform = *(Transform *) entity_get_component(game_state.ecs, player, Transform),
-        //     };
-        //     Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
-        //     Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
-        //     Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
-        //
-        //     Vec2 cell_size = vec2s(5.0f);
-        //     obj_sw = vec2_div(obj_sw, cell_size);
-        //     obj_ne = vec2_div(obj_ne, cell_size);
-        //
-        //     Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
-        //     Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
-        //
-        //     for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
-        //         for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
-        //             renderer_draw_quad(game_state.renderer, (Quad) {
-        //                     .pos = vec2_mul(vec2(x, y), cell_size),
-        //                     .size = cell_size,
-        //                 }, vec2s(0.0f), TEXTURE_NULL, color_rgba_hex(0xffffff80));
-        //         }
-        //     }
-        // }
+        for (u32 i = 0; i < game_state.debug_draw_i; i++) {
+            DebugDraw draw = game_state.debug_draw[i];
+            renderer_draw_quad(game_state.renderer,
+                    draw.quad,
+                    vec2s(0.0f),
+                    TEXTURE_NULL,
+                    draw.color);
+        }
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);

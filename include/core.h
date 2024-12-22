@@ -35,6 +35,7 @@ typedef u32 b32;
 #define min(A, B) ((A) < (B) ? (A) : (B))
 #define max(A, B) ((A) > (B) ? (A) : (B))
 #define lerp(A, B, T) ((A) + ((B) - (A)) * (T))
+#define sign(V) ((V) > 0 ? 1 : (V) < 0 ? -1 : 0)
 
 #define PI 3.14159265359f
 #define rad(DEG) ((DEG)/(2*PI))
