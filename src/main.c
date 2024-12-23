@@ -247,6 +247,12 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer >= controller[i].shoot_delay) {
             controller[i].shoot_timer = 0.0f;
 
+            Vec2 mouse = screen_to_world_space(state->cam, mouse_position(state->window));
+            Vec2 player = transform[i].pos;
+            Vec2 dir = vec2_sub(mouse, player);
+            dir = vec2_normalized(dir);
+            dir = vec2_muls(dir, 30.0f);
+
             Entity proj = ecs_entity(ecs);
             entity_add_component(ecs, proj, Transform, {
                     .pos = transform[i].pos,
@@ -259,10 +265,11 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .friendly = true,
                     .env_collide = true,
                     .penetration = 1,
-                    .lifespan = -1.0f,
+                    .lifespan = 1.0f,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
-                    .gravity_multiplier = 10.0f,
+                    .gravity_multiplier = 0.0f,
+                    .velocity = dir,
                     .tile_collision_cbs = {
                         projectile_tile_collision
                     },
@@ -282,7 +289,7 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         }
 
         projectile[i].lifespan -= state->dt;
-        if (projectile[i].lifespan <= 0.0f && projectile[i].penetration == 0) {
+        if (projectile[i].lifespan <= 0.0f || projectile[i].penetration == 0) {
             Entity entity = ecs_query_iter_get_entity(iter, i);
             ecs_entity_kill(ecs, entity);
         }
@@ -554,42 +561,18 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
                     };
 
                     CollisionManifold manifold = colliding(obj->transform, tile_transform);
-                    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                        .quad = {
-                            .pos = tile_transform.pos,
-                            .size = tile_transform.size,
-                        },
-                        .color = COLOR_BLUE,
-                    };
                     if (manifold.is_colliding) {
                         obj->transform.pos = vec2_sub(obj->transform.pos, manifold.depth);
                         if (manifold.normal.y == -1.0f) {
                             obj->body.velocity.y = 0.0f;
                         }
-                        // if (manifold.normal.x != 0.0f) {
-                        //     if (manifold.normal.x > 0.0f && obj->body.velocity.x > 0.0f) {
-                        //         obj->body.velocity.x = 0.0f;
-                        //     } else if (manifold.normal.x < 0.0f && obj->body.velocity.x < 0.0f) {
-                        //         obj->body.velocity.x = 0.0f;
-                        //     }
-                        // } else {
-                        //     obj->transform.pos.y -= manifold.depth.y;
-                        //     if (manifold.normal.y > 0.0f && obj->body.velocity.y > 0.0f) {
-                        //         obj->body.velocity.y = 0.0f;
-                        //     } else if (manifold.normal.y < 0.0f && obj->body.velocity.y < 0.0f) {
-                        //         obj->body.velocity.y = 0.0f;
-                        //     }
-                        // }
+
+                        for (u32 j = 0; obj->body.tile_collision_cbs[j] != NULL; j++) {
+                            obj->body.tile_collision_cbs[j](state->ecs, obj->id, pos, manifold);
+                        }
                     }
                 }
             }
-            state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                .quad = {
-                    .pos = obj->transform.pos,
-                    .size = obj->transform.size,
-                },
-                .color = COLOR_GREEN,
-            };
             free(tiles);
         }
     }
