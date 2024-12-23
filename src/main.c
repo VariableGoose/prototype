@@ -26,8 +26,8 @@ struct Tile {
     Color color;
 };
 
-#define WORLD_WIDTH 80
-#define WORLD_HEIGHT 128
+#define WORLD_WIDTH 128
+#define WORLD_HEIGHT 64
 
 typedef struct DebugDraw DebugDraw;
 struct DebugDraw {
@@ -115,6 +115,12 @@ struct CollisionManifold {
     Vec2 depth;
     Vec2 normal;
 };
+
+typedef enum {
+    COLLISION_ENTITY,
+    COLLISION_TILE,
+} CollisionType;
+
 typedef void (*CollisionCallback)(ECS *ecs, Entity self, Entity other, CollisionManifold manifold);
 
 typedef struct PhysicsBody PhysicsBody;
@@ -183,41 +189,40 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
-        Vec2 under_player = transform->pos;
-        under_player.y -= transform->size.y;
-        for (i32 x = -1; x < 2; x++) {
-            under_player.x = transform->pos.x + x;
-            controller->grounded = get_tile(state, under_player).type != TILE_NONE;
-            if (controller->grounded) {
-                break;
-            }
-        }
+        Vec2 under_player = transform[i].pos;
+        under_player.y -= transform[i].size.y;
+        controller[i].grounded = get_tile(state, under_player).type != TILE_NONE;
 
         body[i].velocity.x = controller[i].input.horizontal*controller[i].max_horizontal_speed;
-        // if (controller[i].input.horizontal != 0.0f) {
-        //     f32 curr_vel = body[i].velocity.x;
-        //     f32 target_vel = controller[i].input.horizontal*controller[i].max_horizontal_speed;
-        //     f32 delta = target_vel - curr_vel;
-        //     f32 acc = delta * controller[i].acceleration;
-        //     body[i].velocity.x += acc*state->dt_fixed;
-        // } else {
-        //     f32 dec = -sign(body[i].velocity.x)*controller[i].deceleration;;
-        //     body[i].velocity.x += dec*state->dt_fixed;
-        // }
 
         if (controller[i].input.jumping && controller[i].grounded) {
             body[i].velocity.y = 30.0f;
             controller[i].grounded = false;
         }
 
-        // if (controller[i].input.jump_cancel && body[i].velocity.y > 0.0f) {
-        //     controller[i].input.jump_cancel = false;
-        //     body[i].velocity.y /= 2.0f;
-        // }
+        if (controller[i].input.jump_cancel && body[i].velocity.y > 0.0f) {
+            controller[i].input.jump_cancel = false;
+            body[i].velocity.y /= 2.0f;
+        }
 
         if (transform[i].pos.y <= 0.0f) {
             transform[i].pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f);
             body[i].velocity = vec2s(0.0f);
+        }
+
+        // Auto step-up
+        if (body[i].velocity.x != 0.0f) {
+            Vec2 side_of_player = transform[i].pos;
+            side_of_player.x += transform[i].size.x * sign(body[i].velocity.x);
+            Vec2 side_up_of_player = side_of_player;
+            side_up_of_player.y += 1.0f;
+
+            Tile side = get_tile(state, side_of_player);
+            Tile side_up = get_tile(state, side_up_of_player);
+
+            if (side.type != TILE_NONE && side_up.type == TILE_NONE) {
+                transform[i].pos.y += 1.0f;
+            }
         }
     }
 }
@@ -245,8 +250,8 @@ void camera_follow_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Transform *transform = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        // state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt);
-        state->cam.position = transform->pos;
+        state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt*10.0f);
+        // state->cam.position = transform->pos;
     }
 }
 
@@ -328,7 +333,8 @@ void setup_world(GameState *state) {
         u32 y = (sinf(rad(x))+1.0f)*5.0f;
         state->tiles[x+y*WORLD_WIDTH] = (Tile) {
             .type = TILE_GROUND,
-            .color = color_hsv(x*10.0f, 0.75f, 0.5f),
+            // .color = color_hsv(x*10.0f, 0.75f, 0.5f),
+            .color = color_rgb_hex(0x212121)
         };
     }
 }
@@ -505,30 +511,24 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
 
                     CollisionManifold manifold = colliding(obj->transform, tile_transform);
                     if (manifold.is_colliding) {
-                        state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                            .quad = {
-                                .pos = tile_transform.pos,
-                                .size = tile_transform.size,
-                            },
-                                .color = COLOR_RED,
-                        };
-
-                        log_debug("(%f, %f)", vec2_arg(manifold.normal));
-                        if (manifold.normal.x != 0.0f) {
-                            obj->transform.pos.x -= manifold.depth.x;
-                            if (manifold.normal.x > 0.0f && obj->body.velocity.x > 0.0f) {
-                                obj->body.velocity.x = 0.0f;
-                            } else if (manifold.normal.x < 0.0f && obj->body.velocity.x < 0.0f) {
-                                obj->body.velocity.x = 0.0f;
-                            }
-                        } else {
-                            obj->transform.pos.y -= manifold.depth.y;
-                            if (manifold.normal.y > 0.0f && obj->body.velocity.y > 0.0f) {
-                                obj->body.velocity.y = 0.0f;
-                            } else if (manifold.normal.y < 0.0f && obj->body.velocity.y < 0.0f) {
-                                obj->body.velocity.y = 0.0f;
-                            }
+                        obj->transform.pos = vec2_sub(obj->transform.pos, manifold.depth);
+                        if (manifold.normal.y == -1.0f) {
+                            obj->body.velocity.y = 0.0f;
                         }
+                        // if (manifold.normal.x != 0.0f) {
+                        //     if (manifold.normal.x > 0.0f && obj->body.velocity.x > 0.0f) {
+                        //         obj->body.velocity.x = 0.0f;
+                        //     } else if (manifold.normal.x < 0.0f && obj->body.velocity.x < 0.0f) {
+                        //         obj->body.velocity.x = 0.0f;
+                        //     }
+                        // } else {
+                        //     obj->transform.pos.y -= manifold.depth.y;
+                        //     if (manifold.normal.y > 0.0f && obj->body.velocity.y > 0.0f) {
+                        //         obj->body.velocity.y = 0.0f;
+                        //     } else if (manifold.normal.y < 0.0f && obj->body.velocity.y < 0.0f) {
+                        //         obj->body.velocity.y = 0.0f;
+                        //     }
+                        // }
                     }
                 }
             }
@@ -631,7 +631,7 @@ i32 main(void) {
     Entity player = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, player, Transform, {
             .pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
-            .size = vec2s(1.0f),
+            .size = vec2(1.0f, 1.0f),
         });
     entity_add_component(game_state.ecs, player, PlayerController, {
             .acceleration = 5.0f,
@@ -676,9 +676,9 @@ i32 main(void) {
         for (u8 i = 0;
                 i < 10 && last_time_step >= game_state.dt_fixed;
                 i++, last_time_step -= game_state.dt_fixed) {
-            ecs_run_group(game_state.ecs, game_state.fixed_group);
-
             game_state.debug_draw_i = 0;
+
+            ecs_run_group(game_state.ecs, game_state.fixed_group);
 
             PhysicsWorld world = physics_world_init(&game_state);
             physics_world_step(&world, &game_state, game_state.dt_fixed);
