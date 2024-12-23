@@ -259,7 +259,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .friendly = true,
                     .env_collide = true,
                     .penetration = 1,
-                    .lifespan = 10.0f,
+                    .lifespan = -1.0f,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
                     .gravity_multiplier = 10.0f,
@@ -277,11 +277,12 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Projectile *projectile = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        projectile[i].lifespan -= state->dt;
+        if (projectile[i].lifespan == -1.0f) {
+            continue;
+        }
 
-        if ((projectile[i].lifespan != -1.0f &&
-            projectile[i].lifespan <= 0.0f) ||
-            projectile[i].penetration == 0) {
+        projectile[i].lifespan -= state->dt;
+        if (projectile[i].lifespan <= 0.0f && projectile[i].penetration == 0) {
             Entity entity = ecs_query_iter_get_entity(iter, i);
             ecs_entity_kill(ecs, entity);
         }
@@ -535,6 +536,7 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
                 continue;
             }
 
+            // Tile collision
             Ivec2 area;
             Tile *tiles = get_tiles_in_rect(state, obj->transform.pos, vec2_adds(obj->transform.size, 1.0f), ALLOCATOR_LIBC, &area);
             for (i32 y = 0; y < area.y; y++) {
@@ -544,14 +546,21 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
                     }
 
                     Vec2 pos = obj->transform.pos;
-                    pos.x = roundf(pos.x) - area.x / 2.0f + x;
-                    pos.y = roundf(pos.y) - area.y / 2.0f + y;
+                    pos.x = roundf(pos.x - area.x / 2.0f) + x;
+                    pos.y = roundf(pos.y - area.y / 2.0f) + y;
                     Transform tile_transform = {
                         .pos = pos,
                         .size = vec2s(1.0f),
                     };
 
                     CollisionManifold manifold = colliding(obj->transform, tile_transform);
+                    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                        .quad = {
+                            .pos = tile_transform.pos,
+                            .size = tile_transform.size,
+                        },
+                        .color = COLOR_BLUE,
+                    };
                     if (manifold.is_colliding) {
                         obj->transform.pos = vec2_sub(obj->transform.pos, manifold.depth);
                         if (manifold.normal.y == -1.0f) {
@@ -574,6 +583,13 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
                     }
                 }
             }
+            state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                .quad = {
+                    .pos = obj->transform.pos,
+                    .size = obj->transform.size,
+                },
+                .color = COLOR_GREEN,
+            };
             free(tiles);
         }
     }
