@@ -99,6 +99,11 @@ struct PlayerController {
     f32 acceleration;
     f32 deceleration;
     b8 grounded;
+
+    f32 max_flight_time;
+    f32 flight_time;
+    f32 max_vertical_speed;
+    f32 flight_acc;
 };
 
 typedef struct Renderable Renderable;
@@ -189,19 +194,35 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     for (u32 i = 0; i < iter.count; i++) {
         Vec2 under_player = transform[i].pos;
         under_player.y -= transform[i].size.y;
-        controller[i].grounded = get_tile(state, under_player).type != TILE_NONE;
+        f32 distance_to_ground = roundf(under_player.y) - transform[i].pos.y;
+        controller[i].grounded = get_tile(state, under_player).type != TILE_NONE && distance_to_ground >= -1.0f;
+        if (controller[i].grounded) {
+            controller[i].flight_time = controller[i].max_flight_time;
+        }
 
         body[i].velocity.x = controller[i].input.horizontal*controller[i].max_horizontal_speed;
 
+        // Jumping
         if (controller[i].input.jumping && controller[i].grounded) {
             body[i].velocity.y = 30.0f;
             controller[i].grounded = false;
+            controller[i].flight_time = controller[i].max_flight_time;
         }
 
-        if (controller[i].input.jump_cancel && body[i].velocity.y > 0.0f) {
-            controller[i].input.jump_cancel = false;
-            body[i].velocity.y /= 2.0f;
+        // Flying
+        if (controller[i].input.jumping && controller[i].flight_time > 0.0f) {
+            // Negate gravity
+            body[i].velocity.y -= state->gravity*body[i].gravity_multiplier*state->dt;
+
+            f32 current = body[i].velocity.y;
+            f32 target = controller[i].max_vertical_speed;
+            if (current < target) {
+                f32 delta = target - current;
+                body[i].velocity.y += controller[i].flight_acc*delta*state->dt;
+            }
+            controller[i].flight_time -= state->dt;
         }
+        body[i].velocity.y = clamp(body[i].velocity.y, -controller[i].max_vertical_speed, controller[i].max_vertical_speed);
 
         if (transform[i].pos.y <= 0.0f) {
             transform[i].pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f);
@@ -251,8 +272,8 @@ void camera_follow_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Transform *transform = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt*10.0f);
-        // state->cam.position = transform->pos;
+        // state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt*10.0f);
+        state->cam.position = transform->pos;
     }
 }
 
@@ -269,7 +290,7 @@ GameState game_state_new(void) {
         .cam = {
             .direction = vec2(1.0f, 1.0f),
             .screen_size = window_get_size(window),
-            .zoom = 25.0f,
+            .zoom = 50.0f,
         },
     };
 }
@@ -635,7 +656,11 @@ i32 main(void) {
     entity_add_component(game_state.ecs, player, PlayerController, {
             .acceleration = 5.0f,
             .deceleration = 40.0f,
-            .max_horizontal_speed = 15.0f,
+            .max_horizontal_speed = 30.0f,
+
+            .max_flight_time = 10.0f,
+            .max_vertical_speed = 30.0f,
+            .flight_acc = 5.0f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
             .color = color_hsv(0.0f, 0.75f, 1.0f),
