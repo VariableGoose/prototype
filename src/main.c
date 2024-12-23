@@ -100,10 +100,14 @@ struct PlayerController {
     f32 deceleration;
     b8 grounded;
 
+    f32 max_fall_speed;
     f32 max_flight_time;
     f32 flight_time;
     f32 max_vertical_speed;
     f32 flight_acc;
+
+    f32 shoot_delay;
+    f32 shoot_timer;
 };
 
 typedef struct Renderable Renderable;
@@ -119,12 +123,8 @@ struct CollisionManifold {
     Vec2 normal;
 };
 
-typedef enum {
-    COLLISION_ENTITY,
-    COLLISION_TILE,
-} CollisionType;
-
-typedef void (*CollisionCallback)(ECS *ecs, Entity self, Entity other, CollisionManifold manifold);
+typedef void (*EntityCollisionCallback)(ECS *ecs, Entity self, Entity other, CollisionManifold manifold);
+typedef void (*TileCollisionCallback)(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold);
 
 typedef struct PhysicsBody PhysicsBody;
 struct PhysicsBody {
@@ -133,7 +133,8 @@ struct PhysicsBody {
     Vec2 velocity;
     b8 is_static;
     b8 collider;
-    CollisionCallback collision_cbs[16];
+    EntityCollisionCallback entity_collision_cbs[16];
+    TileCollisionCallback tile_collision_cbs[16];
 };
 
 typedef struct Projectile Projectile;
@@ -146,13 +147,10 @@ struct Projectile {
 
 // -----------------------------------------------------------------------------
 
-static void projectile_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
+static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold) {
     (void) manifold;
-    Projectile *proj = entity_get_component(ecs, self, Projectile);
-    PhysicsBody *other_body = entity_get_component(ecs, other, PhysicsBody);
-    if (proj->env_collide && other_body->is_static && other_body->collider) {
-        ecs_entity_kill(ecs, self);
-    }
+    (void) tile_position;
+    ecs_entity_kill(ecs, self);
 }
 
 // -- Systems ------------------------------------------------------------------
@@ -192,6 +190,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
+        // Grounded
         Vec2 under_player = transform[i].pos;
         under_player.y -= transform[i].size.y;
         f32 distance_to_ground = roundf(under_player.y) - transform[i].pos.y;
@@ -200,6 +199,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             controller[i].flight_time = controller[i].max_flight_time;
         }
 
+        // Horizontal movement
         body[i].velocity.x = controller[i].input.horizontal*controller[i].max_horizontal_speed;
 
         // Jumping
@@ -222,12 +222,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             }
             controller[i].flight_time -= state->dt;
         }
-        body[i].velocity.y = clamp(body[i].velocity.y, -controller[i].max_vertical_speed, controller[i].max_vertical_speed);
-
-        if (transform[i].pos.y <= 0.0f) {
-            transform[i].pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f);
-            body[i].velocity = vec2s(0.0f);
-        }
+        body[i].velocity.y = clamp(body[i].velocity.y, controller[i].max_fall_speed, controller[i].max_vertical_speed);
 
         // Auto step-up
         if (body[i].velocity.x != 0.0f) {
@@ -245,6 +240,33 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     transform[i].pos.y += 1.0f;
                 }
             }
+        }
+
+        // Shooting
+        controller[i].shoot_timer += state->dt;
+        if (mouse_button_down(state->window, MOUSE_BUTTON_LEFT) && controller[i].shoot_timer >= controller[i].shoot_delay) {
+            controller[i].shoot_timer = 0.0f;
+
+            Entity proj = ecs_entity(ecs);
+            entity_add_component(ecs, proj, Transform, {
+                    .pos = transform[i].pos,
+                    .size = vec2s(0.5f),
+                });
+            entity_add_component(ecs, proj, Renderable, {
+                    .color = COLOR_WHITE,
+                });
+            entity_add_component(ecs, proj, Projectile, {
+                    .friendly = true,
+                    .env_collide = true,
+                    .penetration = 1,
+                    .lifespan = 10.0f,
+                });
+            entity_add_component(ecs, proj, PhysicsBody, {
+                    .gravity_multiplier = 10.0f,
+                    .tile_collision_cbs = {
+                        projectile_tile_collision
+                    },
+                });
         }
     }
 }
@@ -632,14 +654,6 @@ void physics_world_free(GameState *state, PhysicsWorld *world) {
     free(world->cells);
 }
 
-static void player_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
-    PlayerController *controller = entity_get_component(ecs, self, PlayerController);
-    PhysicsBody *other_body = entity_get_component(ecs, other, PhysicsBody);
-    if (other_body->is_static && manifold.normal.y == -1) {
-        controller->grounded = true;
-    }
-}
-
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
@@ -658,9 +672,12 @@ i32 main(void) {
             .deceleration = 40.0f,
             .max_horizontal_speed = 30.0f,
 
+            .max_fall_speed = -90.0f,
             .max_flight_time = 10.0f,
             .max_vertical_speed = 30.0f,
             .flight_acc = 5.0f,
+
+            .shoot_delay = 0.1f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
             .color = color_hsv(0.0f, 0.75f, 1.0f),
@@ -670,15 +687,11 @@ i32 main(void) {
             .gravity_multiplier = 10.0f,
             .is_static = false,
             .collider = true,
-            .collision_cbs = {
-                player_collision
-            },
         });
 
     u32 fps = 0;
     f32 fps_timer = 0.0f;
 
-    f32 last_time_step = 0.0f;
     f32 last = glfwGetTime();
     while (window_is_open(game_state.window)) {
         f32 curr = glfwGetTime();
