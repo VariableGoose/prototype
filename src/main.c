@@ -41,12 +41,10 @@ struct GameState {
     Window *window;
     Renderer *renderer;
     f32 dt;
-    f32 dt_fixed;
     f32 gravity;
     Camera cam;
 
-    SystemGroup free_group;
-    SystemGroup fixed_group;
+    SystemGroup group;
 
     Tile tiles[WORLD_WIDTH*WORLD_HEIGHT];
 
@@ -214,14 +212,17 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         if (body[i].velocity.x != 0.0f) {
             Vec2 side_of_player = transform[i].pos;
             side_of_player.x += transform[i].size.x * sign(body[i].velocity.x);
-            Vec2 side_up_of_player = side_of_player;
-            side_up_of_player.y += 1.0f;
 
-            Tile side = get_tile(state, side_of_player);
-            Tile side_up = get_tile(state, side_up_of_player);
+            if (fabsf(roundf(side_of_player.x) - transform[i].pos.x) <= 1.0f) {
+                Vec2 side_up_of_player = side_of_player;
+                side_up_of_player.y += 1.0f;
 
-            if (side.type != TILE_NONE && side_up.type == TILE_NONE) {
-                transform[i].pos.y += 1.0f;
+                Tile side = get_tile(state, side_of_player);
+                Tile side_up = get_tile(state, side_up_of_player);
+
+                if (side.type != TILE_NONE && side_up.type == TILE_NONE) {
+                    transform[i].pos.y += 1.0f;
+                }
             }
         }
     }
@@ -233,7 +234,7 @@ void projectile_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Projectile *projectile = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        projectile[i].lifespan -= state->dt_fixed;
+        projectile[i].lifespan -= state->dt;
 
         if ((projectile[i].lifespan != -1.0f &&
             projectile[i].lifespan <= 0.0f) ||
@@ -264,7 +265,6 @@ GameState game_state_new(void) {
         .ecs = ecs_new(),
         .window = window,
         .renderer = renderer_new(4096, ALLOCATOR_LIBC),
-        .dt_fixed = 1.0f / 50.0f,
         .gravity = -9.82f,
         .cam = {
             .direction = vec2(1.0f, 1.0f),
@@ -284,8 +284,7 @@ void game_state_free(GameState *state) {
 }
 
 void setup_ecs(GameState *state) {
-    state->free_group = ecs_system_group(state->ecs);
-    state->fixed_group = ecs_system_group(state->ecs);
+    state->group = ecs_system_group(state->ecs);
 
     ecs_register_component(state->ecs, Transform);
     ecs_register_component(state->ecs, PlayerController);
@@ -293,14 +292,14 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, PhysicsBody);
     ecs_register_component(state->ecs, Projectile);
 
-    ecs_register_system(state->ecs, player_input_system, state->free_group, (QueryDesc) {
+    ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, PlayerController),
                 QUERY_FIELDS_END,
             },
         });
-    ecs_register_system(state->ecs, player_control_system, state->fixed_group, (QueryDesc) {
+    ecs_register_system(state->ecs, player_control_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, PlayerController),
@@ -310,7 +309,7 @@ void setup_ecs(GameState *state) {
             },
         });
 
-    ecs_register_system(state->ecs, projectile_system, state->fixed_group, (QueryDesc) {
+    ecs_register_system(state->ecs, projectile_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, Projectile),
@@ -318,7 +317,7 @@ void setup_ecs(GameState *state) {
             },
         });
 
-    ecs_register_system(state->ecs, camera_follow_system, state->free_group, (QueryDesc) {
+    ecs_register_system(state->ecs, camera_follow_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, Transform),
@@ -672,20 +671,14 @@ i32 main(void) {
         game_state.cam.screen_size = window_get_size(game_state.window);
 
         // Game logic
-        last_time_step += game_state.dt;
-        for (u8 i = 0;
-                i < 10 && last_time_step >= game_state.dt_fixed;
-                i++, last_time_step -= game_state.dt_fixed) {
-            game_state.debug_draw_i = 0;
+        game_state.debug_draw_i = 0;
 
-            ecs_run_group(game_state.ecs, game_state.fixed_group);
+        ecs_run_group(game_state.ecs, game_state.group);
 
-            PhysicsWorld world = physics_world_init(&game_state);
-            physics_world_step(&world, &game_state, game_state.dt_fixed);
-            physics_world_update_ecs(&world, &game_state);
-            physics_world_free(&game_state, &world);
-        }
-        ecs_run_group(game_state.ecs, game_state.free_group);
+        PhysicsWorld world = physics_world_init(&game_state);
+        physics_world_step(&world, &game_state, game_state.dt);
+        physics_world_update_ecs(&world, &game_state);
+        physics_world_free(&game_state, &world);
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
