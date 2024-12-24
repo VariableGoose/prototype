@@ -516,65 +516,45 @@ static CollisionManifold colliding(Transform a, Transform b) {
 }
 
 void physics_world_step(GameState *state, f32 dt) {
-    SpatialGrid *grid = &state->grid;
-    for (u32 i = 0; i < grid->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(grid->cells[i]); j++) {
-            Entity ent = grid->cells[i][j];
-            if (!entity_alive(state->ecs, ent)) {
+    Query query = ecs_query(state->ecs, (QueryDesc) {
+            .fields = {
+                ecs_id(state->ecs, Transform),
+                ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *transform = ecs_query_iter_get_field(iter, 0);
+        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            if (body[j].is_static) {
                 continue;
             }
 
-            Transform *transform = entity_get_component(state->ecs, ent, Transform);
-            if (transform == NULL) {
-                log_warn("Entity in spatial grid has no transform.");
-                continue;
-            }
-            PhysicsBody *body = entity_get_component(state->ecs, ent, PhysicsBody);
-            if (body == NULL) {
-                continue;
-            }
-
-            if (body->is_static) {
-                continue;
-            }
-            body->acceleration.y += state->gravity*body->gravity_multiplier;
-            body->velocity = vec2_add(body->velocity, vec2_muls(body->acceleration, dt));
-            transform->pos = vec2_add(transform->pos, vec2_muls(body->velocity, dt));
-            body->acceleration = vec2s(0.0f);
+            body[j].acceleration.y += state->gravity*body[j].gravity_multiplier;
+            body[j].velocity = vec2_add(body[j].velocity, vec2_muls(body[j].acceleration, dt));
+            transform[j].pos = vec2_add(transform[j].pos, vec2_muls(body[j].velocity, dt));
+            body[j].acceleration = vec2s(0.0f);
         }
     }
 
-    for (u32 i = 0; i < grid->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(grid->cells[i]); j++) {
-            Entity ent = grid->cells[i][j];
-            if (!entity_alive(state->ecs, ent)) {
-                continue;
-            }
-
-            Transform *transform = entity_get_component(state->ecs, ent, Transform);
-            if (transform == NULL) {
-                log_warn("Entity in spatial grid has no transform.");
-                continue;
-            }
-            PhysicsBody *body = entity_get_component(state->ecs, ent, PhysicsBody);
-            if (body == NULL) {
-                continue;
-            }
-
-            if (body->is_static) {
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *transform = ecs_query_iter_get_field(iter, 0);
+        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            if (body[j].is_static) {
                 continue;
             }
 
             // Tile collision
             Ivec2 area;
-            Tile *tiles = get_tiles_in_rect(state, transform->pos, vec2_adds(transform->size, 1.0f), ALLOCATOR_LIBC, &area);
+            Tile *tiles = get_tiles_in_rect(state, transform[j].pos, vec2_adds(transform[j].size, 1.0f), ALLOCATOR_LIBC, &area);
             for (i32 y = 0; y < area.y; y++) {
                 for (i32 x = 0; x < area.x; x++) {
-                    if (tiles[x+y*area.x].type == TILE_NONE) {
-                        continue;
-                    }
-
-                    Vec2 pos = transform->pos;
+                    Vec2 pos = transform[j].pos;
                     pos.x = roundf(pos.x - area.x / 2.0f) + x;
                     pos.y = roundf(pos.y - area.y / 2.0f) + y;
                     Transform tile_transform = {
@@ -582,15 +562,28 @@ void physics_world_step(GameState *state, f32 dt) {
                         .size = vec2s(1.0f),
                     };
 
+                    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                        .quad = {
+                            .pos = tile_transform.pos,
+                            .size = tile_transform.size,
+                        },
+                        .color = COLOR_BLUE,
+                    };
+
+                    if (tiles[x+y*area.x].type == TILE_NONE) {
+                        continue;
+                    }
+
                     CollisionManifold manifold = colliding(*transform, tile_transform);
                     if (manifold.is_colliding) {
-                        transform->pos = vec2_sub(transform->pos, manifold.depth);
+                        transform[j].pos = vec2_sub(transform[j].pos, manifold.depth);
                         if (manifold.normal.y == -1.0f) {
-                            body->velocity.y = 0.0f;
+                            body[j].velocity.y = 0.0f;
                         }
 
-                        for (u32 j = 0; body->tile_collision_cbs[j] != NULL; j++) {
-                            body->tile_collision_cbs[j](state->ecs, ent, pos, manifold);
+                        for (u32 j = 0; body[j].tile_collision_cbs[j] != NULL; j++) {
+                            Entity ent = ecs_query_iter_get_entity(iter, j);
+                            body[j].tile_collision_cbs[j](state->ecs, ent, pos, manifold);
                         }
                     }
                 }
@@ -599,60 +592,66 @@ void physics_world_step(GameState *state, f32 dt) {
         }
     }
 
+    ecs_query_free(state->ecs, query);
+
     // Collision detection.
-    // for (u32 i = 0; i < world->cell_count; i++) {
-    //     for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
-    //         for (u32 k = 0; k < vec_len(world->cells[i].objs); k++) {
-    //             if (j == k) {
-    //                 continue;
-    //             }
-    //
-    //             PhysicsObject *a = &world->cells[i].objs[j];
-    //             PhysicsObject *b = &world->cells[i].objs[k];
-    //
-    //             if (a->body.is_static) {
-    //                 continue;
-    //             }
-    //
-    //             CollisionManifold manifold = colliding(a->transform, b->transform);
-    //             if (!manifold.is_colliding) {
-    //                 continue;
-    //             }
-    //
-    //             if (b->body.is_static && b->body.collider && a->body.collider) {
-    //                 if (manifold.normal.x != 0.0f) {
-    //                     a->transform.pos.x -= manifold.depth.x;
-    //                     if (manifold.normal.x > 0.0f && a->body.velocity.x > 0.0f) {
-    //                         a->body.velocity.x = 0.0f;
-    //                     } else if (manifold.normal.x < 0.0f && a->body.velocity.x < 0.0f) {
-    //                         a->body.velocity.x = 0.0f;
-    //                     }
-    //                 } else {
-    //                     a->transform.pos.y -= manifold.depth.y;
-    //                     if (manifold.normal.y > 0.0f && a->body.velocity.y > 0.0f) {
-    //                         a->body.velocity.y = 0.0f;
-    //                     } else if (manifold.normal.y < 0.0f && a->body.velocity.y < 0.0f) {
-    //                         a->body.velocity.y = 0.0f;
-    //                     }
-    //                 }
-    //             }
-    //
-    //             for (u32 l = 0; l < arrlen(a->body.collision_cbs); l++) {
-    //                 if (a->body.collision_cbs[l] == NULL) {
-    //                     break;
-    //                 }
-    //                 a->body.collision_cbs[l](state->ecs, a->id, b->id, manifold);
-    //             }
-    //
-    //             for (u32 l = 0; l < arrlen(b->body.collision_cbs); l++) {
-    //                 if (b->body.collision_cbs[l] == NULL) {
-    //                     break;
-    //                 }
-    //                 b->body.collision_cbs[l](state->ecs, b->id, a->id, manifold);
-    //             }
-    //         }
-    //     }
-    // }
+    SpatialGrid grid = state->grid;
+    for (u32 i = 0; i < grid.cell_count; i++) {
+        u32 len = vec_len(grid.cells[i]);
+        if (len == 0) {
+            continue;
+        }
+        for (u32 j = 0; j < len - 1; j++) {
+            Entity a = grid.cells[i][j];
+            if (!entity_alive(state->ecs, a)) {
+                continue;
+            }
+            Transform *a_transform = entity_get_component(state->ecs, a, Transform);
+            PhysicsBody *a_body = entity_get_component(state->ecs, a, PhysicsBody);
+            if (a_transform == NULL) {
+                log_error("Entity without transform in spatial grid.");
+                continue;
+            }
+            if (a_body == NULL) {
+                continue;
+            }
+
+            for (u32 k = j + 1; k < len; k++) {
+                Entity b = grid.cells[i][k];
+                if (!entity_alive(state->ecs, b)) {
+                    continue;
+                }
+                Transform *b_transform = entity_get_component(state->ecs, b, Transform);
+                PhysicsBody *b_body = entity_get_component(state->ecs, b, PhysicsBody);
+                if (b_transform == NULL) {
+                    log_error("Entity without transform in spatial grid.");
+                    continue;
+                }
+                if (b_body == NULL) {
+                    continue;
+                }
+
+                CollisionManifold manifold = colliding(*a_transform, *b_transform);
+                if (!manifold.is_colliding) {
+                    continue;
+                }
+
+                for (u32 l = 0; l < arrlen(a_body->entity_collision_cbs); l++) {
+                    if (a_body->entity_collision_cbs[l] == NULL) {
+                        break;
+                    }
+                    a_body->entity_collision_cbs[l](state->ecs, a, b, manifold);
+                }
+
+                for (u32 l = 0; l < arrlen(b_body->entity_collision_cbs); l++) {
+                    if (b_body->entity_collision_cbs[l] == NULL) {
+                        break;
+                    }
+                    b_body->entity_collision_cbs[l](state->ecs, b, a, manifold);
+                }
+            }
+        }
+    }
 }
 
 i32 main(void) {
@@ -728,12 +727,13 @@ i32 main(void) {
         game_state.debug_draw_i = 0;
 
         {
+            grid_clear(&game_state.grid);
             Query query = ecs_query(game_state.ecs, (QueryDesc) {
                     .fields = {
                     ecs_id(game_state.ecs, Transform),
                     QUERY_FIELDS_END,
                     },
-                    });
+                });
             for (u32 i = 0; i < query.count; i++) {
                 QueryIter iter = ecs_query_get_iter(query, i);
                 for (u32 j = 0; j < iter.count; j++) {
@@ -749,8 +749,6 @@ i32 main(void) {
         physics_world_step(&game_state, game_state.dt);
         // physics_world_update_ecs(&world, &game_state);
         // physics_world_free(&game_state, &world);
-
-        grid_clear(&game_state.grid);
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
