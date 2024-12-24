@@ -5,6 +5,7 @@
 #include "window.h"
 #include "ds.h"
 #include <math.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 #define GLFW_INCLUDE_NONE
@@ -12,73 +13,6 @@
 #include <glad/gl.h>
 
 #include <stdlib.h>
-
-typedef enum {
-    TILE_NONE,
-    TILE_GROUND,
-
-    TILE_TYPE_COUNT,
-} TileType;
-
-typedef struct Tile Tile;
-struct Tile {
-    TileType type;
-    Color color;
-};
-
-#define WORLD_WIDTH 128
-#define WORLD_HEIGHT 64
-
-typedef struct DebugDraw DebugDraw;
-struct DebugDraw {
-    Quad quad;
-    Color color;
-};
-
-typedef struct GameState GameState;
-struct GameState {
-    ECS *ecs;
-    Window *window;
-    Renderer *renderer;
-    f32 dt;
-    f32 gravity;
-    Camera cam;
-
-    SystemGroup group;
-
-    Tile tiles[WORLD_WIDTH*WORLD_HEIGHT];
-
-    DebugDraw debug_draw[1024];
-    u32 debug_draw_i;
-};
-
-Tile get_tile(GameState *state, Vec2 pos) {
-    Ivec2 idx = ivec2(roundf(pos.x), roundf(pos.y));
-    if (idx.x < 0 || idx.y < 0 || idx.x >= WORLD_WIDTH || idx.y >= WORLD_HEIGHT) {
-        // log_warn("Indexing out of world bounds.");
-        return (Tile) {0};
-    }
-    return state->tiles[idx.x+idx.y*WORLD_WIDTH];
-}
-
-Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator allocator, Ivec2 *area) {
-    Vec2 bl = vec2_sub(center, half_size);
-    Vec2 tr = vec2_add(center, half_size);
-
-    Ivec2 bl_idx = ivec2(roundf(bl.x), roundf(bl.y));
-    Ivec2 tr_idx = ivec2(roundf(tr.x), roundf(tr.y));
-
-    *area = ivec2_sub(tr_idx, bl_idx);
-    Tile *tiles = allocator.alloc(area->x*area->y*sizeof(Tile), allocator.ctx);
-
-    for (i32 y = 0; y < area->y; y++) {
-        for (i32 x = 0; x < area->x; x++) {
-            tiles[x+y*area->x] = get_tile(state, vec2(bl_idx.x+x, bl_idx.y+y));
-        }
-    }
-
-    return tiles;
-}
 
 // -- Components ---------------------------------------------------------------
 
@@ -147,6 +81,143 @@ struct Projectile {
 
 // -----------------------------------------------------------------------------
 
+typedef enum {
+    TILE_NONE,
+    TILE_GROUND,
+
+    TILE_TYPE_COUNT,
+} TileType;
+
+typedef struct Tile Tile;
+struct Tile {
+    TileType type;
+    Color color;
+};
+
+#define WORLD_WIDTH 128
+#define WORLD_HEIGHT 64
+
+typedef struct DebugDraw DebugDraw;
+struct DebugDraw {
+    Quad quad;
+    Color color;
+};
+
+typedef Vec(Entity) Cell;
+
+typedef struct SpatialGrid SpatialGrid;
+struct SpatialGrid {
+    Allocator allocator;
+    u32 cell_count;
+    Vec2 cell_size;
+    Cell *cells;
+};
+
+// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
+static u64 hash_coord(i32 x, i32 y) {
+    u64 hash = x & ((u64) y << 32);
+    hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9UL;
+    hash = (hash ^ (hash >> 27)) * 0x94d049bb133111ebUL;
+    hash = hash ^ (hash >> 31);
+    return hash;
+}
+
+SpatialGrid grid_new(u32 cell_count, Vec2 cell_size, Allocator allocator) {
+    Cell *cells = allocator.alloc(sizeof(Cell)*cell_count, allocator.ctx);
+    memset(cells, 0, sizeof(Cell)*cell_count);
+    return (SpatialGrid) {
+        .allocator = allocator,
+        .cell_count = cell_count,
+        .cell_size = cell_size,
+        .cells = cells,
+    };
+}
+
+void grid_free(SpatialGrid *grid) {
+    for (u32 i = 0; i < grid->cell_count; i++) {
+        vec_free(grid->cells[i]);
+    }
+    grid->allocator.free(grid->cells, sizeof(Cell)*grid->cell_count, grid->allocator.ctx);
+}
+
+void grid_insert(SpatialGrid *grid, ECS *ecs, Entity entity) {
+    Transform *transform = entity_get_component(ecs, entity, Transform);
+    if (transform == NULL) {
+        log_warn("Partitioning an entity without a transform.");
+        return;
+    }
+
+    Vec2 half_size = vec2_divs(transform->size, 2.0f);
+    Vec2 obj_sw = vec2_sub(transform->pos, half_size);
+    Vec2 obj_ne = vec2_add(transform->pos, half_size);
+
+    obj_sw = vec2_div(obj_sw, grid->cell_size);
+    obj_ne = vec2_div(obj_ne, grid->cell_size);
+
+    Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
+    Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
+
+    for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
+        for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
+            u64 hash = hash_coord(x, y);
+            u32 index = hash % grid->cell_count;
+            vec_push(grid->cells[index], entity);
+        }
+    }
+}
+
+void grid_clear(SpatialGrid *grid) {
+    for (u32 i = 0; i < grid->cell_count; i++) {
+        vec_clear(grid->cells[i]);
+    }
+}
+
+typedef struct GameState GameState;
+struct GameState {
+    ECS *ecs;
+    Window *window;
+    Renderer *renderer;
+    f32 dt;
+    f32 gravity;
+    Camera cam;
+
+    SystemGroup group;
+
+    Tile tiles[WORLD_WIDTH*WORLD_HEIGHT];
+
+    SpatialGrid grid;
+
+    DebugDraw debug_draw[1024];
+    u32 debug_draw_i;
+};
+
+Tile get_tile(GameState *state, Vec2 pos) {
+    Ivec2 idx = ivec2(roundf(pos.x), roundf(pos.y));
+    if (idx.x < 0 || idx.y < 0 || idx.x >= WORLD_WIDTH || idx.y >= WORLD_HEIGHT) {
+        // log_warn("Indexing out of world bounds.");
+        return (Tile) {0};
+    }
+    return state->tiles[idx.x+idx.y*WORLD_WIDTH];
+}
+
+Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator allocator, Ivec2 *area) {
+    Vec2 bl = vec2_sub(center, half_size);
+    Vec2 tr = vec2_add(center, half_size);
+
+    Ivec2 bl_idx = ivec2(roundf(bl.x), roundf(bl.y));
+    Ivec2 tr_idx = ivec2(roundf(tr.x), roundf(tr.y));
+
+    *area = ivec2_sub(tr_idx, bl_idx);
+    Tile *tiles = allocator.alloc(area->x*area->y*sizeof(Tile), allocator.ctx);
+
+    for (i32 y = 0; y < area->y; y++) {
+        for (i32 x = 0; x < area->x; x++) {
+            tiles[x+y*area->x] = get_tile(state, vec2(bl_idx.x+x, bl_idx.y+y));
+        }
+    }
+
+    return tiles;
+}
 static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold) {
     (void) manifold;
     (void) tile_position;
@@ -317,6 +388,7 @@ GameState game_state_new(void) {
         .window = window,
         .renderer = renderer_new(4096, ALLOCATOR_LIBC),
         .gravity = -9.82f,
+        .grid = grid_new(4096, vec2(5.0f, 5.0f), ALLOCATOR_LIBC),
         .cam = {
             .direction = vec2(1.0f, 1.0f),
             .screen_size = window_get_size(window),
@@ -327,6 +399,7 @@ GameState game_state_new(void) {
 
 void game_state_free(GameState *state) {
     ecs_free(state->ecs);
+    grid_free(&state->grid);
     // Always call 'renderer_free()' before 'window_free()' becaues the former
     // uses OpenGL functions that are no longer available after 'window_free()'
     // has been called.
@@ -389,27 +462,6 @@ void setup_world(GameState *state) {
     }
 }
 
-typedef struct PhysicsObject PhysicsObject;
-struct PhysicsObject {
-    Entity id;
-    Transform transform;
-    PhysicsBody body;
-};
-
-typedef struct Cell Cell;
-struct Cell {
-    Vec(PhysicsObject) objs;
-};
-
-typedef struct PhysicsWorld PhysicsWorld;
-struct PhysicsWorld {
-    Query query;
-
-    u32 cell_count;
-    Vec2 cell_size;
-    Cell *cells;
-};
-
 static CollisionManifold colliding(Transform a, Transform b) {
     CollisionManifold manifold = {0};
 
@@ -463,96 +515,66 @@ static CollisionManifold colliding(Transform a, Transform b) {
     return manifold;
 }
 
-// https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
-static u64 hash_coord(i32 x, i32 y) {
-    u64 hash = x & ((u64) y << 32);
-    hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9UL;
-    hash = (hash ^ (hash >> 27)) * 0x94d049bb133111ebUL;
-    hash = hash ^ (hash >> 31);
-    return hash;
-}
-
-PhysicsWorld physics_world_init(GameState *state) {
-    u32 cell_count = 4096;
-    PhysicsWorld world = {
-        .cells = calloc(cell_count, sizeof(Cell)),
-        .cell_count = cell_count,
-        .cell_size = vec2s(5.0f),
-    };
-
-    // Pull entities out of the ecs.
-    world.query = ecs_query(state->ecs, (QueryDesc) {
-            .fields = {
-                ecs_id(state->ecs, Transform),
-                ecs_id(state->ecs, PhysicsBody),
-                QUERY_FIELDS_END,
-            },
-        });
-    for (u32 i = 0; i < world.query.count; i++) {
-        QueryIter iter = ecs_query_get_iter(world.query, i);
-        Transform *transform = ecs_query_iter_get_field(iter, 0);
-        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
-        for (u32 j = 0; j < iter.count; j++) {
-            PhysicsObject obj = {
-                .id = ecs_query_iter_get_entity(iter, j),
-                .transform = transform[j],
-                .body = body[j],
-            };
-
-            Vec2 half_size = vec2_divs(obj.transform.size, 2.0f);
-            Vec2 obj_sw = vec2_sub(obj.transform.pos, half_size);
-            Vec2 obj_ne = vec2_add(obj.transform.pos, half_size);
-
-            obj_sw = vec2_div(obj_sw, world.cell_size);
-            obj_ne = vec2_div(obj_ne, world.cell_size);
-
-            Ivec2 cell_sw = ivec2(roundf(obj_sw.x), roundf(obj_sw.y));
-            Ivec2 cell_ne = ivec2(roundf(obj_ne.x), roundf(obj_ne.y));
-
-            for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
-                for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
-                    u64 hash = hash_coord(x, y);
-                    u32 index = hash % world.cell_count;
-                    vec_push(world.cells[index].objs, obj);
-                }
-            }
-        }
-    }
-
-    return world;
-}
-
-void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
-    for (u32 i = 0; i < world->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
-            PhysicsObject *obj = &world->cells[i].objs[j];
-            if (obj->body.is_static) {
+void physics_world_step(GameState *state, f32 dt) {
+    SpatialGrid *grid = &state->grid;
+    for (u32 i = 0; i < grid->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(grid->cells[i]); j++) {
+            Entity ent = grid->cells[i][j];
+            if (!entity_alive(state->ecs, ent)) {
                 continue;
             }
-            obj->body.acceleration.y += state->gravity*obj->body.gravity_multiplier;
-            obj->body.velocity = vec2_add(obj->body.velocity, vec2_muls(obj->body.acceleration, dt));
-            obj->transform.pos = vec2_add(obj->transform.pos, vec2_muls(obj->body.velocity, dt));
-            obj->body.acceleration = vec2s(0.0f);
+
+            Transform *transform = entity_get_component(state->ecs, ent, Transform);
+            if (transform == NULL) {
+                log_warn("Entity in spatial grid has no transform.");
+                continue;
+            }
+            PhysicsBody *body = entity_get_component(state->ecs, ent, PhysicsBody);
+            if (body == NULL) {
+                continue;
+            }
+
+            if (body->is_static) {
+                continue;
+            }
+            body->acceleration.y += state->gravity*body->gravity_multiplier;
+            body->velocity = vec2_add(body->velocity, vec2_muls(body->acceleration, dt));
+            transform->pos = vec2_add(transform->pos, vec2_muls(body->velocity, dt));
+            body->acceleration = vec2s(0.0f);
         }
     }
 
-    for (u32 i = 0; i < world->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
-            PhysicsObject *obj = &world->cells[i].objs[j];
-            if (obj->body.is_static) {
+    for (u32 i = 0; i < grid->cell_count; i++) {
+        for (u32 j = 0; j < vec_len(grid->cells[i]); j++) {
+            Entity ent = grid->cells[i][j];
+            if (!entity_alive(state->ecs, ent)) {
+                continue;
+            }
+
+            Transform *transform = entity_get_component(state->ecs, ent, Transform);
+            if (transform == NULL) {
+                log_warn("Entity in spatial grid has no transform.");
+                continue;
+            }
+            PhysicsBody *body = entity_get_component(state->ecs, ent, PhysicsBody);
+            if (body == NULL) {
+                continue;
+            }
+
+            if (body->is_static) {
                 continue;
             }
 
             // Tile collision
             Ivec2 area;
-            Tile *tiles = get_tiles_in_rect(state, obj->transform.pos, vec2_adds(obj->transform.size, 1.0f), ALLOCATOR_LIBC, &area);
+            Tile *tiles = get_tiles_in_rect(state, transform->pos, vec2_adds(transform->size, 1.0f), ALLOCATOR_LIBC, &area);
             for (i32 y = 0; y < area.y; y++) {
                 for (i32 x = 0; x < area.x; x++) {
                     if (tiles[x+y*area.x].type == TILE_NONE) {
                         continue;
                     }
 
-                    Vec2 pos = obj->transform.pos;
+                    Vec2 pos = transform->pos;
                     pos.x = roundf(pos.x - area.x / 2.0f) + x;
                     pos.y = roundf(pos.y - area.y / 2.0f) + y;
                     Transform tile_transform = {
@@ -560,15 +582,15 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
                         .size = vec2s(1.0f),
                     };
 
-                    CollisionManifold manifold = colliding(obj->transform, tile_transform);
+                    CollisionManifold manifold = colliding(*transform, tile_transform);
                     if (manifold.is_colliding) {
-                        obj->transform.pos = vec2_sub(obj->transform.pos, manifold.depth);
+                        transform->pos = vec2_sub(transform->pos, manifold.depth);
                         if (manifold.normal.y == -1.0f) {
-                            obj->body.velocity.y = 0.0f;
+                            body->velocity.y = 0.0f;
                         }
 
-                        for (u32 j = 0; obj->body.tile_collision_cbs[j] != NULL; j++) {
-                            obj->body.tile_collision_cbs[j](state->ecs, obj->id, pos, manifold);
+                        for (u32 j = 0; body->tile_collision_cbs[j] != NULL; j++) {
+                            body->tile_collision_cbs[j](state->ecs, ent, pos, manifold);
                         }
                     }
                 }
@@ -633,26 +655,6 @@ void physics_world_step(PhysicsWorld *world, GameState *state, f32 dt) {
     // }
 }
 
-void physics_world_update_ecs(PhysicsWorld *world, GameState *state) {
-    for (u32 i = 0; i < world->cell_count; i++) {
-        for (u32 j = 0; j < vec_len(world->cells[i].objs); j++) {
-            PhysicsObject obj = world->cells[i].objs[j];
-            Transform *transform = entity_get_component(state->ecs, obj.id, Transform);
-            PhysicsBody *body = entity_get_component(state->ecs, obj.id, PhysicsBody);
-            *transform = obj.transform;
-            *body = obj.body;
-        }
-    }
-}
-
-void physics_world_free(GameState *state, PhysicsWorld *world) {
-    ecs_query_free(state->ecs, world->query);
-    for (u32 i = 0; i < world->cell_count; i++) {
-        vec_free(world->cells[i].objs);
-    }
-    free(world->cells);
-}
-
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
@@ -676,13 +678,28 @@ i32 main(void) {
             .max_vertical_speed = 30.0f,
             .flight_acc = 5.0f,
 
-            .shoot_delay = 0.1f,
+            .shoot_delay = 1.0f / 5.0f,
         });
     entity_add_component(game_state.ecs, player, Renderable, {
             .color = color_hsv(0.0f, 0.75f, 1.0f),
             .texture = TEXTURE_NULL,
         });
     entity_add_component(game_state.ecs, player, PhysicsBody, {
+            .gravity_multiplier = 10.0f,
+            .is_static = false,
+            .collider = true,
+        });
+
+    Entity slime = ecs_entity(game_state.ecs);
+    entity_add_component(game_state.ecs, slime, Transform, {
+            .pos = vec2(WORLD_WIDTH/2.0f + 8, WORLD_HEIGHT/8.0f),
+            .size = vec2(1.0f, 1.0f),
+        });
+    entity_add_component(game_state.ecs, slime, Renderable, {
+            .color = color_hsv(90.0f, 0.75f, 1.0f),
+            .texture = TEXTURE_NULL,
+        });
+    entity_add_component(game_state.ecs, slime, PhysicsBody, {
             .gravity_multiplier = 10.0f,
             .is_static = false,
             .collider = true,
@@ -710,12 +727,30 @@ i32 main(void) {
         // Game logic
         game_state.debug_draw_i = 0;
 
+        {
+            Query query = ecs_query(game_state.ecs, (QueryDesc) {
+                    .fields = {
+                    ecs_id(game_state.ecs, Transform),
+                    QUERY_FIELDS_END,
+                    },
+                    });
+            for (u32 i = 0; i < query.count; i++) {
+                QueryIter iter = ecs_query_get_iter(query, i);
+                for (u32 j = 0; j < iter.count; j++) {
+                    Entity ent = ecs_query_iter_get_entity(iter, j);
+                    grid_insert(&game_state.grid, game_state.ecs, ent);
+                }
+            }
+            ecs_query_free(game_state.ecs, query);
+        }
+
         ecs_run_group(game_state.ecs, game_state.group);
 
-        PhysicsWorld world = physics_world_init(&game_state);
-        physics_world_step(&world, &game_state, game_state.dt);
-        physics_world_update_ecs(&world, &game_state);
-        physics_world_free(&game_state, &world);
+        physics_world_step(&game_state, game_state.dt);
+        // physics_world_update_ecs(&world, &game_state);
+        // physics_world_free(&game_state, &world);
+
+        grid_clear(&game_state.grid);
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
