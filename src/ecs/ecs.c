@@ -16,6 +16,8 @@ ECS *ecs_new(void) {
     HashMapDesc component_map_desc = hash_map_desc_default(ecs->component_map);
     component_map_desc.cmp = str_cmp;
     component_map_desc.hash = str_hash;
+    ComponentId null_component = -1;
+    component_map_desc.zero_value = &null_component;
     hash_map_new(ecs->component_map, component_map_desc);
 
     HashMapDesc archetype_map_desc = hash_map_desc_default(ecs->archetype_map);
@@ -147,6 +149,7 @@ void _entity_add_component(ECS *ecs, Entity entity, Str component_name, const vo
     assert(ecs->entity_generation[index] == generation);
 
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
+    assert(component_id != (ComponentId) -1 && "Add non-existent component.");
 
     if (ecs->active_queries > 0) {
         u64 component_size = ecs->components[component_id].size;
@@ -176,6 +179,7 @@ void _entity_remove_component(ECS *ecs, Entity entity, Str component_name) {
     assert(ecs->entity_generation[index] == generation);
 
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
+    assert(component_id != (ComponentId) -1 && "Remove non-existent component.");
 
     if (ecs->active_queries > 0) {
         vec_push(ecs->command_queue, ((Command) {
@@ -198,6 +202,7 @@ void *_entity_get_component(ECS *ecs, Entity entity, Str component_name) {
         log_error("Column retrieved is null: %zu, %u, %u", entity, (u32) entity, (u32) (entity >> 32));
     }
     ComponentId component_id = hash_map_get(ecs->component_map, component_name);
+    assert(component_id != (ComponentId) -1 && "Get non-existent component.");
     size_t *row = hash_map_getp(column->archetype->component_lookup, component_id);
     // Archetype doesn't have component.
     if (row == NULL) {
