@@ -221,7 +221,10 @@ Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator
 static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold) {
     (void) manifold;
     (void) tile_position;
-    ecs_entity_kill(ecs, self);
+    Projectile *proj = entity_get_component(ecs, self, Projectile);
+    if (proj->env_collide) {
+        ecs_entity_kill(ecs, self);
+    }
 }
 
 // -- Systems ------------------------------------------------------------------
@@ -336,10 +339,10 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .friendly = true,
                     .env_collide = true,
                     .penetration = 1,
-                    .lifespan = 1.0f,
+                    .lifespan = 3.0f,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
-                    .gravity_multiplier = 0.0f,
+                    .gravity_multiplier = 5.0f,
                     .velocity = dir,
                     .tile_collision_cbs = {
                         projectile_tile_collision
@@ -515,6 +518,22 @@ static CollisionManifold colliding(Transform a, Transform b) {
     return manifold;
 }
 
+// static b8 aabb_overlap(Transform a, Transform b) {
+//     Vec2 a_half = vec2_divs(a.size, 2.0f);
+//     f32 a_l = a.pos.x-a_half.x;
+//     f32 a_r = a.pos.x+a_half.x;
+//     f32 a_b = a.pos.y-a_half.y;
+//     f32 a_t = a.pos.y+a_half.y;
+//
+//     Vec2 b_half = vec2_divs(b.size, 2.0f);
+//     f32 b_l = b.pos.x-b_half.x;
+//     f32 b_r = b.pos.x+b_half.x;
+//     f32 b_b = b.pos.y-b_half.y;
+//     f32 b_t = b.pos.y+b_half.y;
+//
+//     return a_l <= b_r && a_r >= b_l && a_t >= b_b && a_b <= b_t;
+// }
+
 void physics_world_step(GameState *state, f32 dt) {
     Query query = ecs_query(state->ecs, (QueryDesc) {
             .fields = {
@@ -554,6 +573,10 @@ void physics_world_step(GameState *state, f32 dt) {
             Tile *tiles = get_tiles_in_rect(state, transform[j].pos, vec2_adds(transform[j].size, 1.0f), ALLOCATOR_LIBC, &area);
             for (i32 y = 0; y < area.y; y++) {
                 for (i32 x = 0; x < area.x; x++) {
+                    if (tiles[x+y*area.x].type == TILE_NONE) {
+                        continue;
+                    }
+
                     Vec2 pos = transform[j].pos;
                     pos.x = roundf(pos.x - area.x / 2.0f) + x;
                     pos.y = roundf(pos.y - area.y / 2.0f) + y;
@@ -562,39 +585,30 @@ void physics_world_step(GameState *state, f32 dt) {
                         .size = vec2s(1.0f),
                     };
 
-                    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                        .quad = {
-                            .pos = tile_transform.pos,
-                            .size = tile_transform.size,
-                        },
-                        .color = COLOR_BLUE,
-                    };
-
-                    if (tiles[x+y*area.x].type == TILE_NONE) {
-                        continue;
-                    }
-
-                    CollisionManifold manifold = colliding(*transform, tile_transform);
+                    CollisionManifold manifold = colliding(transform[j], tile_transform);
                     if (manifold.is_colliding) {
                         transform[j].pos = vec2_sub(transform[j].pos, manifold.depth);
                         if (manifold.normal.y == -1.0f) {
                             body[j].velocity.y = 0.0f;
                         }
 
-                        for (u32 j = 0; body[j].tile_collision_cbs[j] != NULL; j++) {
-                            Entity ent = ecs_query_iter_get_entity(iter, j);
-                            body[j].tile_collision_cbs[j](state->ecs, ent, pos, manifold);
+                        for (u32 k = 0; k < arrlen(body[j].tile_collision_cbs); k++) {
+                            if (body[j].tile_collision_cbs[k] != NULL) {
+                                Entity ent = ecs_query_iter_get_entity(iter, j);
+                                body[j].tile_collision_cbs[k](state->ecs, ent, pos, manifold);
+                            }
                         }
                     }
                 }
             }
+
             free(tiles);
         }
     }
 
     ecs_query_free(state->ecs, query);
 
-    // Collision detection.
+    // Entity-to-entity collision
     SpatialGrid grid = state->grid;
     for (u32 i = 0; i < grid.cell_count; i++) {
         u32 len = vec_len(grid.cells[i]);
