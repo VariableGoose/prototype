@@ -77,6 +77,12 @@ struct Projectile {
     i32 penetration;
     b8 friendly;
     b8 env_collide;
+    i32 damage;
+};
+
+typedef struct Enemy Enemy;
+struct Enemy {
+    i32 health;
 };
 
 // -----------------------------------------------------------------------------
@@ -115,7 +121,7 @@ struct SpatialGrid {
 
 // https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
 static u64 hash_coord(i32 x, i32 y) {
-    u64 hash = x & ((u64) y << 32);
+    u64 hash = x | ((u64) y << 32);
     hash = (hash ^ (hash >> 30)) * 0xbf58476d1ce4e5b9UL;
     hash = (hash ^ (hash >> 27)) * 0x94d049bb133111ebUL;
     hash = hash ^ (hash >> 31);
@@ -218,12 +224,31 @@ Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator
 
     return tiles;
 }
+
 static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold) {
     (void) manifold;
     (void) tile_position;
     Projectile *proj = entity_get_component(ecs, self, Projectile);
     if (proj->env_collide) {
         ecs_entity_kill(ecs, self);
+    }
+}
+
+static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
+    (void) manifold;
+    Projectile *proj = entity_get_component(ecs, self, Projectile);
+    if (proj->friendly) {
+        Enemy *enemy = entity_get_component(ecs, other, Enemy);
+        if (enemy == NULL) {
+            return;
+        }
+        proj->penetration -= 1;
+        enemy->health -= proj->damage;
+
+        if (proj->penetration == 0) {
+            ecs_entity_kill(ecs, self);
+        }
+        log_debug("Hit enemy");
     }
 }
 
@@ -347,6 +372,9 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .tile_collision_cbs = {
                         projectile_tile_collision
                     },
+                    .entity_collision_cbs = {
+                        projectile_entity_collision
+                    },
                 });
         }
     }
@@ -378,90 +406,6 @@ void camera_follow_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     for (u32 i = 0; i < iter.count; i++) {
         // state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt*10.0f);
         state->cam.position = transform->pos;
-    }
-}
-
-// -----------------------------------------------------------------------------
-
-GameState game_state_new(void) {
-    Window *window = window_new(1280, 720, "Prototype", false, ALLOCATOR_LIBC);
-    gfx_init(glfwGetProcAddress);
-    return (GameState) {
-        .ecs = ecs_new(),
-        .window = window,
-        .renderer = renderer_new(4096, ALLOCATOR_LIBC),
-        .gravity = -9.82f,
-        .grid = grid_new(4096, vec2(5.0f, 5.0f), ALLOCATOR_LIBC),
-        .cam = {
-            .direction = vec2(1.0f, 1.0f),
-            .screen_size = window_get_size(window),
-            .zoom = 50.0f,
-        },
-    };
-}
-
-void game_state_free(GameState *state) {
-    ecs_free(state->ecs);
-    grid_free(&state->grid);
-    // Always call 'renderer_free()' before 'window_free()' becaues the former
-    // uses OpenGL functions that are no longer available after 'window_free()'
-    // has been called.
-    renderer_free(state->renderer);
-    window_free(state->window);
-}
-
-void setup_ecs(GameState *state) {
-    state->group = ecs_system_group(state->ecs);
-
-    ecs_register_component(state->ecs, Transform);
-    ecs_register_component(state->ecs, PlayerController);
-    ecs_register_component(state->ecs, Renderable);
-    ecs_register_component(state->ecs, PhysicsBody);
-    ecs_register_component(state->ecs, Projectile);
-
-    ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
-            .user_ptr = state,
-            .fields = {
-                [0] = ecs_id(state->ecs, PlayerController),
-                QUERY_FIELDS_END,
-            },
-        });
-    ecs_register_system(state->ecs, player_control_system, state->group, (QueryDesc) {
-            .user_ptr = state,
-            .fields = {
-                [0] = ecs_id(state->ecs, PlayerController),
-                [1] = ecs_id(state->ecs, PhysicsBody),
-                [2] = ecs_id(state->ecs, Transform),
-                QUERY_FIELDS_END,
-            },
-        });
-
-    ecs_register_system(state->ecs, projectile_system, state->group, (QueryDesc) {
-            .user_ptr = state,
-            .fields = {
-                [0] = ecs_id(state->ecs, Projectile),
-                QUERY_FIELDS_END,
-            },
-        });
-
-    ecs_register_system(state->ecs, camera_follow_system, state->group, (QueryDesc) {
-            .user_ptr = state,
-            .fields = {
-                [0] = ecs_id(state->ecs, Transform),
-                [1] = ecs_id(state->ecs, PlayerController),
-                QUERY_FIELDS_END,
-            },
-        });
-}
-
-void setup_world(GameState *state) {
-    for (u32 x = 0; x < WORLD_WIDTH; x++) {
-        u32 y = (sinf(rad(x))+1.0f)*5.0f;
-        state->tiles[x+y*WORLD_WIDTH] = (Tile) {
-            .type = TILE_GROUND,
-            // .color = color_hsv(x*10.0f, 0.75f, 0.5f),
-            .color = color_rgb_hex(0x212121)
-        };
     }
 }
 
@@ -534,81 +478,74 @@ static CollisionManifold colliding(Transform a, Transform b) {
 //     return a_l <= b_r && a_r >= b_l && a_t >= b_b && a_b <= b_t;
 // }
 
-void physics_world_step(GameState *state, f32 dt) {
-    Query query = ecs_query(state->ecs, (QueryDesc) {
-            .fields = {
-                ecs_id(state->ecs, Transform),
-                ecs_id(state->ecs, PhysicsBody),
-                QUERY_FIELDS_END,
-            },
-        });
+void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
 
-    for (u32 i = 0; i < query.count; i++) {
-        QueryIter iter = ecs_query_get_iter(query, i);
-        Transform *transform = ecs_query_iter_get_field(iter, 0);
-        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
-        for (u32 j = 0; j < iter.count; j++) {
-            if (body[j].is_static) {
-                continue;
-            }
-
-            body[j].acceleration.y += state->gravity*body[j].gravity_multiplier;
-            body[j].velocity = vec2_add(body[j].velocity, vec2_muls(body[j].acceleration, dt));
-            transform[j].pos = vec2_add(transform[j].pos, vec2_muls(body[j].velocity, dt));
-            body[j].acceleration = vec2s(0.0f);
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+    for (u32 i = 0; i < iter.count; i++) {
+        if (body[i].is_static) {
+            continue;
         }
+
+        body[i].acceleration.y += state->gravity*body[i].gravity_multiplier;
+        body[i].velocity = vec2_add(body[i].velocity, vec2_muls(body[i].acceleration, state->dt));
+        transform[i].pos = vec2_add(transform[i].pos, vec2_muls(body[i].velocity, state->dt));
+        body[i].acceleration = vec2s(0.0f);
     }
+}
 
-    for (u32 i = 0; i < query.count; i++) {
-        QueryIter iter = ecs_query_get_iter(query, i);
-        Transform *transform = ecs_query_iter_get_field(iter, 0);
-        PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
-        for (u32 j = 0; j < iter.count; j++) {
-            if (body[j].is_static) {
-                continue;
-            }
+void tile_collision_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    GameState *state = user_ptr;
 
-            // Tile collision
-            Ivec2 area;
-            Tile *tiles = get_tiles_in_rect(state, transform[j].pos, vec2_adds(transform[j].size, 1.0f), ALLOCATOR_LIBC, &area);
-            for (i32 y = 0; y < area.y; y++) {
-                for (i32 x = 0; x < area.x; x++) {
-                    if (tiles[x+y*area.x].type == TILE_NONE) {
-                        continue;
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
+    for (u32 i = 0; i < iter.count; i++) {
+        if (body[i].is_static) {
+            continue;
+        }
+
+        // Tile collision
+        Ivec2 area;
+        Tile *tiles = get_tiles_in_rect(state, transform[i].pos, vec2_adds(transform[i].size, 1.0f), ALLOCATOR_LIBC, &area);
+        for (i32 y = 0; y < area.y; y++) {
+            for (i32 x = 0; x < area.x; x++) {
+                if (tiles[x+y*area.x].type == TILE_NONE) {
+                    continue;
+                }
+
+                Vec2 pos = transform[i].pos;
+                pos.x = roundf(pos.x - area.x / 2.0f) + x;
+                pos.y = roundf(pos.y - area.y / 2.0f) + y;
+                Transform tile_transform = {
+                    .pos = pos,
+                    .size = vec2s(1.0f),
+                };
+
+                CollisionManifold manifold = colliding(transform[i], tile_transform);
+                if (manifold.is_colliding) {
+                    transform[i].pos = vec2_sub(transform[i].pos, manifold.depth);
+                    if (manifold.normal.y == -1.0f) {
+                        body[i].velocity.y = 0.0f;
                     }
 
-                    Vec2 pos = transform[j].pos;
-                    pos.x = roundf(pos.x - area.x / 2.0f) + x;
-                    pos.y = roundf(pos.y - area.y / 2.0f) + y;
-                    Transform tile_transform = {
-                        .pos = pos,
-                        .size = vec2s(1.0f),
-                    };
-
-                    CollisionManifold manifold = colliding(transform[j], tile_transform);
-                    if (manifold.is_colliding) {
-                        transform[j].pos = vec2_sub(transform[j].pos, manifold.depth);
-                        if (manifold.normal.y == -1.0f) {
-                            body[j].velocity.y = 0.0f;
-                        }
-
-                        for (u32 k = 0; k < arrlen(body[j].tile_collision_cbs); k++) {
-                            if (body[j].tile_collision_cbs[k] != NULL) {
-                                Entity ent = ecs_query_iter_get_entity(iter, j);
-                                body[j].tile_collision_cbs[k](state->ecs, ent, pos, manifold);
-                            }
+                    for (u32 j = 0; j < arrlen(body[i].tile_collision_cbs); j++) {
+                        if (body[i].tile_collision_cbs[j] != NULL) {
+                            Entity ent = ecs_query_iter_get_entity(iter, i);
+                            body[i].tile_collision_cbs[j](ecs, ent, pos, manifold);
                         }
                     }
                 }
             }
-
-            free(tiles);
         }
+
+        free(tiles);
     }
+}
 
-    ecs_query_free(state->ecs, query);
-
-    // Entity-to-entity collision
+void entity_to_entity_collision(GameState *state) {
+    ECS *ecs = state->ecs;
     SpatialGrid grid = state->grid;
     for (u32 i = 0; i < grid.cell_count; i++) {
         u32 len = vec_len(grid.cells[i]);
@@ -617,11 +554,11 @@ void physics_world_step(GameState *state, f32 dt) {
         }
         for (u32 j = 0; j < len - 1; j++) {
             Entity a = grid.cells[i][j];
-            if (!entity_alive(state->ecs, a)) {
+            if (!entity_alive(ecs, a)) {
                 continue;
             }
-            Transform *a_transform = entity_get_component(state->ecs, a, Transform);
-            PhysicsBody *a_body = entity_get_component(state->ecs, a, PhysicsBody);
+            Transform *a_transform = entity_get_component(ecs, a, Transform);
+            PhysicsBody *a_body = entity_get_component(ecs, a, PhysicsBody);
             if (a_transform == NULL) {
                 log_error("Entity without transform in spatial grid.");
                 continue;
@@ -632,11 +569,11 @@ void physics_world_step(GameState *state, f32 dt) {
 
             for (u32 k = j + 1; k < len; k++) {
                 Entity b = grid.cells[i][k];
-                if (!entity_alive(state->ecs, b)) {
+                if (!entity_alive(ecs, b)) {
                     continue;
                 }
-                Transform *b_transform = entity_get_component(state->ecs, b, Transform);
-                PhysicsBody *b_body = entity_get_component(state->ecs, b, PhysicsBody);
+                Transform *b_transform = entity_get_component(ecs, b, Transform);
+                PhysicsBody *b_body = entity_get_component(ecs, b, PhysicsBody);
                 if (b_transform == NULL) {
                     log_error("Entity without transform in spatial grid.");
                     continue;
@@ -650,21 +587,134 @@ void physics_world_step(GameState *state, f32 dt) {
                     continue;
                 }
 
+                state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                    .quad = *(Quad *) &a_transform,
+                    .color = COLOR_RED,
+                };
+                state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+                    .quad = *(Quad *) &b_transform,
+                    .color = COLOR_BLUE,
+                };
+
                 for (u32 l = 0; l < arrlen(a_body->entity_collision_cbs); l++) {
                     if (a_body->entity_collision_cbs[l] == NULL) {
                         break;
                     }
-                    a_body->entity_collision_cbs[l](state->ecs, a, b, manifold);
+                    a_body->entity_collision_cbs[l](ecs, a, b, manifold);
                 }
 
                 for (u32 l = 0; l < arrlen(b_body->entity_collision_cbs); l++) {
                     if (b_body->entity_collision_cbs[l] == NULL) {
                         break;
                     }
-                    b_body->entity_collision_cbs[l](state->ecs, b, a, manifold);
+                    b_body->entity_collision_cbs[l](ecs, b, a, manifold);
                 }
             }
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+GameState game_state_new(void) {
+    Window *window = window_new(1280, 720, "Prototype", false, ALLOCATOR_LIBC);
+    gfx_init(glfwGetProcAddress);
+    return (GameState) {
+        .ecs = ecs_new(),
+        .window = window,
+        .renderer = renderer_new(4096, ALLOCATOR_LIBC),
+        .gravity = -9.82f,
+        .grid = grid_new(4096, vec2(5.0f, 5.0f), ALLOCATOR_LIBC),
+        .cam = {
+            .direction = vec2(1.0f, 1.0f),
+            .screen_size = window_get_size(window),
+            .zoom = 50.0f,
+        },
+    };
+}
+
+void game_state_free(GameState *state) {
+    ecs_free(state->ecs);
+    grid_free(&state->grid);
+    // Always call 'renderer_free()' before 'window_free()' becaues the former
+    // uses OpenGL functions that are no longer available after 'window_free()'
+    // has been called.
+    renderer_free(state->renderer);
+    window_free(state->window);
+}
+
+void setup_ecs(GameState *state) {
+    state->group = ecs_system_group(state->ecs);
+
+    ecs_register_component(state->ecs, Transform);
+    ecs_register_component(state->ecs, PlayerController);
+    ecs_register_component(state->ecs, Renderable);
+    ecs_register_component(state->ecs, PhysicsBody);
+    ecs_register_component(state->ecs, Projectile);
+    ecs_register_component(state->ecs, Enemy);
+
+    ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, PlayerController),
+                QUERY_FIELDS_END,
+            },
+        });
+    ecs_register_system(state->ecs, player_control_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, PlayerController),
+                [1] = ecs_id(state->ecs, PhysicsBody),
+                [2] = ecs_id(state->ecs, Transform),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    ecs_register_system(state->ecs, projectile_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Projectile),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    ecs_register_system(state->ecs, camera_follow_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Transform),
+                [1] = ecs_id(state->ecs, PlayerController),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    // Physics should be run last because the spatial partitioning won't be
+    // correct otherwise.
+    ecs_register_system(state->ecs, physics_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Transform),
+                [1] = ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
+            },
+        });
+    ecs_register_system(state->ecs, tile_collision_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Transform),
+                [1] = ecs_id(state->ecs, PhysicsBody),
+                QUERY_FIELDS_END,
+            },
+        });
+}
+
+void setup_world(GameState *state) {
+    for (u32 x = 0; x < WORLD_WIDTH; x++) {
+        u32 y = (sinf(rad(x))+1.0f)*5.0f;
+        state->tiles[x+y*WORLD_WIDTH] = (Tile) {
+            .type = TILE_GROUND,
+            // .color = color_hsv(x*10.0f, 0.75f, 0.5f),
+            .color = color_rgb_hex(0x212121)
+        };
     }
 }
 
@@ -717,6 +767,9 @@ i32 main(void) {
             .is_static = false,
             .collider = true,
         });
+    entity_add_component(game_state.ecs, slime, Enemy, {
+            .health = 100,
+        });
 
     u32 fps = 0;
     f32 fps_timer = 0.0f;
@@ -759,10 +812,7 @@ i32 main(void) {
         }
 
         ecs_run_group(game_state.ecs, game_state.group);
-
-        physics_world_step(&game_state, game_state.dt);
-        // physics_world_update_ecs(&world, &game_state);
-        // physics_world_free(&game_state, &world);
+        entity_to_entity_collision(&game_state);
 
         // Rendering
         glClearColor(color_arg(COLOR_BLACK));
