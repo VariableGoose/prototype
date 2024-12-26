@@ -124,12 +124,6 @@ extern void renderer_begin(Renderer *renderer, Camera camera);
 extern void renderer_end(Renderer *renderer);
 extern void renderer_submit(Renderer *renderer);
 
-typedef struct Quad Quad;
-struct Quad {
-    Vec2 pos;
-    Vec2 size;
-};
-
 typedef u32 Texture;
 typedef struct Font Font;
 
@@ -153,8 +147,8 @@ struct TextureAtlas {
 // |                |
 // |                |
 // (-1, -1) - (1, -1)
-extern void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color);
-extern void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color);
+extern void renderer_draw_aabb(Renderer *renderer, AABB aabb, Vec2 origin, Texture texture, Color color);
+extern void renderer_draw_aabb_atlas(Renderer *renderer, AABB aabb, Vec2 origin, TextureAtlas atlas, Color color);
 
 // Made to be used during a pass with a camera configured to screen space.
 // (Camera) {

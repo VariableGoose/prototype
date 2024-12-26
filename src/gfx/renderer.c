@@ -180,7 +180,7 @@ static void br_submit(BatchRenderer *br) {
     glUseProgram(0);
 }
 
-static void br_draw_quad(BatchRenderer *br, Quad quad, Vec2 origin, TextureAtlasInternal atlas, Color color) {
+static void br_draw_aabb(BatchRenderer *br, AABB aabb, Vec2 origin, TextureAtlasInternal atlas, Color color) {
     if (br->curr_quad == br->max_batch_size || br->curr_texture == 32) {
         br_end(br);
         br_submit(br);
@@ -222,8 +222,8 @@ static void br_draw_quad(BatchRenderer *br, Quad quad, Vec2 origin, TextureAtlas
 
         vert->pos = pos[i];
         vert->pos = vec2_sub(vert->pos, vec2_divs(vec2_mul(origin, br->camera.direction), 2.0f));
-        vert->pos = vec2_mul(vert->pos, quad.size);
-        vert->pos = vec2_add(vert->pos, vec2_mul(quad.pos, br->camera.direction));
+        vert->pos = vec2_mul(vert->pos, aabb.size);
+        vert->pos = vec2_add(vert->pos, vec2_mul(aabb.position, br->camera.direction));
         vert->pos = vec2_sub(vert->pos, vec2_mul(br->camera.position, br->camera.direction));
 
         vert->uv = uvs[i];
@@ -277,9 +277,9 @@ void renderer_submit(Renderer *renderer) {
     br_submit(&renderer->br);
 }
 
-void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture texture, Color color) {
-    br_draw_quad(&renderer->br,
-            quad,
+void renderer_draw_aabb(Renderer *renderer, AABB aabb, Vec2 origin, Texture texture, Color color) {
+    br_draw_aabb(&renderer->br,
+            aabb,
             origin,
             (TextureAtlasInternal) {
                 renderer->textures[texture].id,
@@ -289,9 +289,9 @@ void renderer_draw_quad(Renderer *renderer, Quad quad, Vec2 origin, Texture text
             color);
 }
 
-void renderer_draw_quad_atlas(Renderer *renderer, Quad quad, Vec2 origin, TextureAtlas atlas, Color color) {
-    br_draw_quad(&renderer->br,
-            quad,
+void renderer_draw_aabb_atlas(Renderer *renderer, AABB aabb, Vec2 origin, TextureAtlas atlas, Color color) {
+    br_draw_aabb(&renderer->br,
+            aabb,
             origin,
             (TextureAtlasInternal) {
                 .id = renderer->textures[atlas.atlas].id,
@@ -307,8 +307,8 @@ void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, 
     FontMetrics metrics = font_get_metrics(font, size);
     for (u64 i = 0; i < string.len; i++) {
         Glyph glyph = font_get_glyph(font, string.data[i], size);
-        renderer_draw_quad_atlas(renderer, (Quad) {
-                .pos = {
+        renderer_draw_aabb_atlas(renderer, (AABB) {
+                .position = {
                     .x = position.x + glyph.offset.x,
                     .y = position.y - glyph.offset.y + metrics.ascent,
                 },

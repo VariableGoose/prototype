@@ -16,11 +16,7 @@
 
 // -- Components ---------------------------------------------------------------
 
-typedef struct Transform Transform;
-struct Transform {
-    Vec2 pos;
-    Vec2 size;
-};
+typedef AABB Transform;
 
 typedef struct PlayerController PlayerController;
 struct PlayerController {
@@ -50,15 +46,8 @@ struct Renderable {
     Texture texture;
 };
 
-typedef struct CollisionManifold CollisionManifold;
-struct CollisionManifold {
-    b8 is_colliding;
-    Vec2 depth;
-    Vec2 normal;
-};
-
-typedef void (*EntityCollisionCallback)(ECS *ecs, Entity self, Entity other, CollisionManifold manifold);
-typedef void (*TileCollisionCallback)(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold);
+typedef void (*EntityCollisionCallback)(ECS *ecs, Entity self, Entity other, MinkowskiDifference manifold);
+typedef void (*TileCollisionCallback)(ECS *ecs, Entity self, Vec2 tile_position, MinkowskiDifference manifold);
 
 typedef struct PhysicsBody PhysicsBody;
 struct PhysicsBody {
@@ -105,7 +94,7 @@ struct Tile {
 
 typedef struct DebugDraw DebugDraw;
 struct DebugDraw {
-    Quad quad;
+    AABB aabb;
     Color color;
 };
 
@@ -153,9 +142,9 @@ void grid_insert(SpatialGrid *grid, ECS *ecs, Entity entity) {
         return;
     }
 
-    Vec2 half_size = vec2_divs(transform->size, 2.0f);
-    Vec2 obj_sw = vec2_sub(transform->pos, half_size);
-    Vec2 obj_ne = vec2_add(transform->pos, half_size);
+    Vec2 half_size = aabb_half_size(*transform);
+    Vec2 obj_sw = vec2_sub(transform->position, half_size);
+    Vec2 obj_ne = vec2_add(transform->position, half_size);
 
     obj_sw = vec2_div(obj_sw, grid->cell_size);
     obj_ne = vec2_div(obj_ne, grid->cell_size);
@@ -290,9 +279,9 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
         // Grounded
-        Vec2 under_player = transform[i].pos;
+        Vec2 under_player = transform[i].position;
         under_player.y -= transform[i].size.y;
-        f32 distance_to_ground = roundf(under_player.y) - transform[i].pos.y;
+        f32 distance_to_ground = roundf(under_player.y) - transform[i].position.y;
         controller[i].grounded = get_tile(state, under_player).type != TILE_NONE && distance_to_ground >= -1.0f;
         if (controller[i].grounded) {
             controller[i].flight_time = controller[i].max_flight_time;
@@ -325,10 +314,10 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
         // Auto step-up
         if (body[i].velocity.x != 0.0f) {
-            Vec2 side_of_player = transform[i].pos;
+            Vec2 side_of_player = transform[i].position;
             side_of_player.x += transform[i].size.x * sign(body[i].velocity.x);
 
-            if (fabsf(roundf(side_of_player.x) - transform[i].pos.x) <= 1.0f) {
+            if (fabsf(roundf(side_of_player.x) - transform[i].position.x) <= 1.0f) {
                 Vec2 side_up_of_player = side_of_player;
                 side_up_of_player.y += 1.0f;
 
@@ -336,7 +325,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                 Tile side_up = get_tile(state, side_up_of_player);
 
                 if (side.type != TILE_NONE && side_up.type == TILE_NONE) {
-                    transform[i].pos.y += 1.0f;
+                    transform[i].position.y += 1.0f;
                 }
             }
         }
@@ -347,14 +336,14 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             controller[i].shoot_timer = 0.0f;
 
             Vec2 mouse = screen_to_world_space(state->cam, mouse_position(state->window));
-            Vec2 player = transform[i].pos;
+            Vec2 player = transform[i].position;
             Vec2 dir = vec2_sub(mouse, player);
             dir = vec2_normalized(dir);
             dir = vec2_muls(dir, 30.0f);
 
             Entity proj = ecs_entity(ecs);
             entity_add_component(ecs, proj, Transform, {
-                    .pos = transform[i].pos,
+                    .position = transform[i].position,
                     .size = vec2s(0.5f),
                 });
             entity_add_component(ecs, proj, Renderable, {
@@ -404,79 +393,10 @@ void camera_follow_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Transform *transform = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        // state->cam.position = vec2_lerp(state->cam.position, transform->pos, state->dt*10.0f);
-        state->cam.position = transform->pos;
+        // state->cam.position = vec2_lerp(state->cam.position, transform->position, state->dt*10.0f);
+        state->cam.position = transform->position;
     }
 }
-
-static CollisionManifold colliding(Transform a, Transform b) {
-    CollisionManifold manifold = {0};
-
-    // https://blog.hamaluik.ca/posts/simple-aabb-collision-using-minkowski-difference/
-    Vec2 a_bottom_left = vec2_sub(a.pos, vec2_divs(a.size, 2.0f));
-    Vec2 b_top_right = vec2_add(b.pos, vec2_divs(b.size, 2.0f));
-    Vec2 size = vec2_add(a.size, b.size);
-    Vec2 min = vec2_sub(a_bottom_left, b_top_right);
-    Vec2 max = vec2_add(min, size);
-    manifold.is_colliding = (
-            min.x < 0.0f &&
-            max.x > 0.0f &&
-            min.y < 0.0f &&
-            max.y > 0.0f
-        );
-
-    if (!manifold.is_colliding) {
-        return manifold;
-    }
-
-    f32 min_dist = fabsf(-min.x);
-    Vec2 bound_point = vec2(min.x, 0.0f);
-    if (fabsf(max.x) < min_dist) {
-        min_dist = fabsf(max.x);
-        bound_point = vec2(max.x, 0.0f);
-    }
-    if (fabsf(max.y) < min_dist) {
-        min_dist = fabsf(max.y);
-        bound_point = vec2(0.0f, max.y);
-    }
-    if (fabsf(min.y) < min_dist) {
-        min_dist = fabsf(min.y);
-        bound_point = vec2(0.0f, min.y);
-    }
-    manifold.depth = bound_point;
-
-    if (fabsf(manifold.depth.x) > fabsf(manifold.depth.y)) {
-        if (manifold.depth.x > 0.0f) {
-            manifold.normal.x = 1.0f;
-        } else {
-            manifold.normal.x = -1.0f;
-        }
-    } else {
-        if (manifold.depth.y > 0.0f) {
-            manifold.normal.y = 1.0f;
-        } else {
-            manifold.normal.y = -1.0f;
-        }
-    }
-
-    return manifold;
-}
-
-// static b8 aabb_overlap(Transform a, Transform b) {
-//     Vec2 a_half = vec2_divs(a.size, 2.0f);
-//     f32 a_l = a.pos.x-a_half.x;
-//     f32 a_r = a.pos.x+a_half.x;
-//     f32 a_b = a.pos.y-a_half.y;
-//     f32 a_t = a.pos.y+a_half.y;
-//
-//     Vec2 b_half = vec2_divs(b.size, 2.0f);
-//     f32 b_l = b.pos.x-b_half.x;
-//     f32 b_r = b.pos.x+b_half.x;
-//     f32 b_b = b.pos.y-b_half.y;
-//     f32 b_t = b.pos.y+b_half.y;
-//
-//     return a_l <= b_r && a_r >= b_l && a_t >= b_b && a_b <= b_t;
-// }
 
 void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
@@ -491,7 +411,7 @@ void physics_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
         body[i].acceleration.y += state->gravity*body[i].gravity_multiplier;
         body[i].velocity = vec2_add(body[i].velocity, vec2_muls(body[i].acceleration, state->dt));
-        transform[i].pos = vec2_add(transform[i].pos, vec2_muls(body[i].velocity, state->dt));
+        transform[i].position = vec2_add(transform[i].position, vec2_muls(body[i].velocity, state->dt));
         body[i].acceleration = vec2s(0.0f);
     }
 }
@@ -508,32 +428,32 @@ void tile_collision_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
         // Tile collision
         Ivec2 area;
-        Tile *tiles = get_tiles_in_rect(state, transform[i].pos, vec2_adds(transform[i].size, 1.0f), ALLOCATOR_LIBC, &area);
+        Tile *tiles = get_tiles_in_rect(state, transform[i].position, vec2_adds(transform[i].size, 1.0f), ALLOCATOR_LIBC, &area);
         for (i32 y = 0; y < area.y; y++) {
             for (i32 x = 0; x < area.x; x++) {
                 if (tiles[x+y*area.x].type == TILE_NONE) {
                     continue;
                 }
 
-                Vec2 pos = transform[i].pos;
+                Vec2 pos = transform[i].position;
                 pos.x = roundf(pos.x - area.x / 2.0f) + x;
                 pos.y = roundf(pos.y - area.y / 2.0f) + y;
                 Transform tile_transform = {
-                    .pos = pos,
+                    .position = pos,
                     .size = vec2s(1.0f),
                 };
 
-                CollisionManifold manifold = colliding(transform[i], tile_transform);
-                if (manifold.is_colliding) {
-                    transform[i].pos = vec2_sub(transform[i].pos, manifold.depth);
-                    if (manifold.normal.y == -1.0f) {
+                MinkowskiDifference diff = aabb_minkowski_difference(transform[i], tile_transform);
+                if (diff.is_overlapping) {
+                    transform[i].position = vec2_sub(transform[i].position, diff.depth);
+                    if (diff.normal.y == -1.0f) {
                         body[i].velocity.y = 0.0f;
                     }
 
                     for (u32 j = 0; j < arrlen(body[i].tile_collision_cbs); j++) {
                         if (body[i].tile_collision_cbs[j] != NULL) {
                             Entity ent = ecs_query_iter_get_entity(iter, i);
-                            body[i].tile_collision_cbs[j](ecs, ent, pos, manifold);
+                            body[i].tile_collision_cbs[j](ecs, ent, pos, diff);
                         }
                     }
                 }
@@ -582,17 +502,17 @@ void entity_to_entity_collision(GameState *state) {
                     continue;
                 }
 
-                CollisionManifold manifold = colliding(*a_transform, *b_transform);
-                if (!manifold.is_colliding) {
+                MinkowskiDifference diff = aabb_minkowski_difference(*a_transform, *b_transform);
+                if (!diff.is_overlapping) {
                     continue;
                 }
 
                 state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                    .quad = *(Quad *) &a_transform,
+                    .aabb = *(AABB *) &a_transform,
                     .color = COLOR_RED,
                 };
                 state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                    .quad = *(Quad *) &b_transform,
+                    .aabb = *(AABB *) &b_transform,
                     .color = COLOR_BLUE,
                 };
 
@@ -600,14 +520,14 @@ void entity_to_entity_collision(GameState *state) {
                     if (a_body->entity_collision_cbs[l] == NULL) {
                         break;
                     }
-                    a_body->entity_collision_cbs[l](ecs, a, b, manifold);
+                    a_body->entity_collision_cbs[l](ecs, a, b, diff);
                 }
 
                 for (u32 l = 0; l < arrlen(b_body->entity_collision_cbs); l++) {
                     if (b_body->entity_collision_cbs[l] == NULL) {
                         break;
                     }
-                    b_body->entity_collision_cbs[l](ecs, b, a, manifold);
+                    b_body->entity_collision_cbs[l](ecs, b, a, diff);
                 }
             }
         }
@@ -728,7 +648,7 @@ i32 main(void) {
 
     Entity player = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, player, Transform, {
-            .pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
+            .position = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
             .size = vec2(1.0f, 1.0f),
         });
     entity_add_component(game_state.ecs, player, PlayerController, {
@@ -755,7 +675,7 @@ i32 main(void) {
 
     Entity slime = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, slime, Transform, {
-            .pos = vec2(WORLD_WIDTH/2.0f + 8, WORLD_HEIGHT/8.0f),
+            .position = vec2(WORLD_WIDTH/2.0f + 8, WORLD_HEIGHT/8.0f),
             .size = vec2(1.0f, 1.0f),
         });
     entity_add_component(game_state.ecs, slime, Renderable, {
@@ -827,8 +747,8 @@ i32 main(void) {
                         break;
 
                     case TILE_GROUND:
-                        renderer_draw_quad(game_state.renderer, (Quad) {
-                                .pos = vec2(x, y),
+                        renderer_draw_aabb(game_state.renderer, (AABB) {
+                                .position = vec2(x, y),
                                 .size = vec2s(1.0f),
                             }, vec2s(0.0f), TEXTURE_NULL, tile.color);
 
@@ -851,8 +771,8 @@ i32 main(void) {
             Transform *t = ecs_query_iter_get_field(iter, 0);
             Renderable *r = ecs_query_iter_get_field(iter, 1);
             for (u32 j = 0; j < iter.count; j++) {
-                renderer_draw_quad(game_state.renderer, (Quad) {
-                        .pos = t[j].pos,
+                renderer_draw_aabb(game_state.renderer, (AABB) {
+                        .position = t[j].position,
                         .size = t[j].size,
                     }, vec2s(0.0f), r[j].texture, r[j].color);
             }
@@ -861,8 +781,8 @@ i32 main(void) {
 
         for (u32 i = 0; i < game_state.debug_draw_i; i++) {
             DebugDraw draw = game_state.debug_draw[i];
-            renderer_draw_quad(game_state.renderer,
-                    draw.quad,
+            renderer_draw_aabb(game_state.renderer,
+                    draw.aabb,
                     vec2s(0.0f),
                     TEXTURE_NULL,
                     draw.color);
