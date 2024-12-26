@@ -9,7 +9,6 @@
 #include <glad/gl.h>
 #include <unibreakdef.h>
 
-#include "linear_algebra.h"
 #include "str.h"
 
 // -- Batch Renderer -----------------------------------------------------------

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "core.h"
-#include "linear_algebra.h"
 
 typedef struct Window Window;
 

@@ -2,7 +2,6 @@
 
 #include "core.h"
 #include "gfx.h"
-#include "linear_algebra.h"
 #include <ds.h>
 
 typedef struct TextureInternal TextureInternal;

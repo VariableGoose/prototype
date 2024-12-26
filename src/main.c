@@ -1,12 +1,8 @@
 #include "ecs.h"
 #include "gfx.h"
 #include "core.h"
-#include "linear_algebra.h"
 #include "window.h"
 #include "ds.h"
-#include <math.h>
-#include <stdatomic.h>
-#include <stdint.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -69,9 +65,18 @@ struct Projectile {
     i32 damage;
 };
 
+typedef enum {
+    ENEMY_AI_NONE,
+    ENEMY_AI_SLIME,
+} EnemyAI;
+
 typedef struct Enemy Enemy;
 struct Enemy {
+    EnemyAI ai;
     i32 health;
+    Entity target;
+    f32 shoot_timer;
+    f32 shoot_delay;
 };
 
 // -----------------------------------------------------------------------------
@@ -117,6 +122,12 @@ static u64 hash_coord(i32 x, i32 y) {
     return hash;
 }
 
+Cell *grid_get_cell(SpatialGrid *grid, i32 x, i32 y) {
+    u64 hash = hash_coord(x, y);
+    u32 index = hash % grid->cell_count;
+    return &grid->cells[index];
+}
+
 SpatialGrid grid_new(u32 cell_count, Vec2 cell_size, Allocator allocator) {
     Cell *cells = allocator.alloc(sizeof(Cell)*cell_count, allocator.ctx);
     memset(cells, 0, sizeof(Cell)*cell_count);
@@ -154,9 +165,8 @@ void grid_insert(SpatialGrid *grid, ECS *ecs, Entity entity) {
 
     for (i32 y = cell_sw.y; y <= cell_ne.y; y++) {
         for (i32 x = cell_sw.x; x <= cell_ne.x; x++) {
-            u64 hash = hash_coord(x, y);
-            u32 index = hash % grid->cell_count;
-            vec_push(grid->cells[index], entity);
+            Cell *cell = grid_get_cell(grid, x, y);
+            vec_push(*cell, entity);
         }
     }
 }
@@ -165,6 +175,32 @@ void grid_clear(SpatialGrid *grid) {
     for (u32 i = 0; i < grid->cell_count; i++) {
         vec_clear(grid->cells[i]);
     }
+}
+
+Vec(Entity) grid_query_radius(SpatialGrid *grid, ECS *ecs, Vec2 pos, f32 radius) {
+    Vec2 grid_min = vec2_sub(pos, vec2s(radius));
+    Vec2 grid_max = vec2_add(pos, vec2s(radius));
+    grid_min = vec2_div(grid_min, grid->cell_size);
+    grid_max = vec2_div(grid_max, grid->cell_size);
+
+    Vec(Entity) result = NULL;
+    for (i32 y = floorf(grid_min.y); y < ceilf(grid_max.y); y++) {
+        for (i32 x = floorf(grid_min.x); x < ceilf(grid_max.x); x++) {
+            Cell *cell = grid_get_cell(grid, x, y);
+            for (u32 i = 0; i < vec_len(*cell); i++) {
+                Entity ent = (*cell)[i];
+                if (!entity_alive(ecs, ent)) {
+                    continue;
+                }
+
+                Transform *transform = entity_get_component(ecs, ent, Transform);
+                if (aabb_overlap_circle(*transform, pos, radius)) {
+                    vec_push(result, ent);
+                }
+            }
+        }
+    }
+    return result;
 }
 
 typedef struct GameState GameState;
@@ -214,7 +250,7 @@ Tile *get_tiles_in_rect(GameState *state, Vec2 center, Vec2 half_size, Allocator
     return tiles;
 }
 
-static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, CollisionManifold manifold) {
+static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position, MinkowskiDifference manifold) {
     (void) manifold;
     (void) tile_position;
     Projectile *proj = entity_get_component(ecs, self, Projectile);
@@ -223,7 +259,7 @@ static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position,
     }
 }
 
-static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, CollisionManifold manifold) {
+static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, MinkowskiDifference manifold) {
     (void) manifold;
     Projectile *proj = entity_get_component(ecs, self, Projectile);
     if (proj->friendly) {
@@ -356,8 +392,9 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .lifespan = 3.0f,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
-                    .gravity_multiplier = 5.0f,
+                    .gravity_multiplier = 0.0f,
                     .velocity = dir,
+                    .collider = true,
                     .tile_collision_cbs = {
                         projectile_tile_collision
                     },
@@ -422,7 +459,7 @@ void tile_collision_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     Transform *transform = ecs_query_iter_get_field(iter, 0);
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     for (u32 i = 0; i < iter.count; i++) {
-        if (body[i].is_static) {
+        if (body[i].is_static || !body[i].collider) {
             continue;
         }
 
@@ -534,6 +571,80 @@ void entity_to_entity_collision(GameState *state) {
     }
 }
 
+void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy) {
+    ECS *ecs = state->ecs;
+
+    // Sarch for target
+    Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
+    for (u32 i = 0; i < vec_len(near); i++) {
+        PlayerController *player = entity_get_component(ecs, near[i], PlayerController);
+        if (player != NULL) {
+            enemy->target = near[i];
+            break;
+        }
+    }
+    vec_free(near);
+
+    if (enemy->target == (Entity) -1) {
+        return;
+    }
+
+    // Shoot towards target
+    enemy->shoot_timer += state->dt;
+    if (enemy->shoot_timer >= enemy->shoot_delay) {
+        enemy->shoot_timer = 0.0f;
+
+        Transform *target_transform = entity_get_component(ecs, enemy->target, Transform);
+        Vec2 dir = vec2_sub(target_transform->position, transform->position);
+        dir = vec2_normalized(dir);
+        dir = vec2_muls(dir, 20.0f);
+
+        Entity proj = ecs_entity(ecs);
+        entity_add_component(ecs, proj, Transform, {
+                .position = transform->position,
+                .size = vec2s(0.5f),
+            });
+        entity_add_component(ecs, proj, Renderable, {
+                .color = color_hsv(60.0f, 0.75f, 1.0f),
+            });
+        entity_add_component(ecs, proj, Projectile, {
+                .friendly = false,
+                .env_collide = false,
+                .penetration = 1,
+                .lifespan = 3.0f,
+            });
+        entity_add_component(ecs, proj, PhysicsBody, {
+                .gravity_multiplier = 0.0f,
+                .velocity = dir,
+                .tile_collision_cbs = {
+                    projectile_tile_collision
+                },
+                .entity_collision_cbs = {
+                    projectile_entity_collision
+                },
+            });
+    }
+    enemy->target = -1;
+}
+
+void enemy_ai(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) ecs;
+    GameState *state = user_ptr;
+
+    Transform *transform = ecs_query_iter_get_field(iter, 0);
+    Enemy *enemy = ecs_query_iter_get_field(iter, 1);
+    for (u32 i = 0; i < iter.count; i++) {
+        Entity ent = ecs_query_iter_get_entity(iter, i);
+        switch (enemy[i].ai) {
+            case ENEMY_AI_NONE:
+                break;
+            case ENEMY_AI_SLIME:
+                slime_ai(state, ent, transform, enemy);
+                break;
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 GameState game_state_new(void) {
@@ -603,6 +714,15 @@ void setup_ecs(GameState *state) {
             .fields = {
                 [0] = ecs_id(state->ecs, Transform),
                 [1] = ecs_id(state->ecs, PlayerController),
+                QUERY_FIELDS_END,
+            },
+        });
+
+    ecs_register_system(state->ecs, enemy_ai, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Transform),
+                [1] = ecs_id(state->ecs, Enemy),
                 QUERY_FIELDS_END,
             },
         });
@@ -688,7 +808,10 @@ i32 main(void) {
             .collider = true,
         });
     entity_add_component(game_state.ecs, slime, Enemy, {
+            .ai = ENEMY_AI_SLIME,
             .health = 100,
+            .target = -1,
+            .shoot_delay = 0.5f,
         });
 
     u32 fps = 0;
