@@ -77,6 +77,8 @@ struct Enemy {
     Entity target;
     f32 shoot_timer;
     f32 shoot_delay;
+    f32 jump_timer;
+    f32 jump_delay;
 };
 
 // -----------------------------------------------------------------------------
@@ -281,16 +283,30 @@ b8 is_grounded(GameState *state, Transform transform) {
     Vec2 half_size = aabb_half_size(transform);
     Vec2 under = transform.position;
     under.y -= half_size.y;
+    under.y = floorf(under.y);
 
-    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-        .aabb = {
-            .position = under,
-            .size = vec2s(0.5f),
-        },
-        .color = COLOR_RED,
-    };
+    i32 x_min = roundf(transform.position.x - half_size.x);
+    i32 x_max = roundf(transform.position.x + half_size.x);
 
-    return false;
+    b8 has_tile_under = false;
+    for (i32 x = x_min; x <= x_max; x++) {
+        under.x = x;
+
+        if (get_tile(state, under).type != TILE_NONE) {
+            has_tile_under = true;
+            break;
+        }
+    }
+
+    if (!has_tile_under) {
+        return false;
+    }
+
+    f32 diff = transform.position.y - under.y;
+    // For the transform to touch the tile the distance from the center of the
+    // transform to the center of the tile must be less or equal to half of the
+    // transform size and half of the tile size (0.5).
+    return diff <= half_size.y + 0.5f;
 }
 
 // -- Systems ------------------------------------------------------------------
@@ -331,10 +347,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
         // Grounded
-        Vec2 under_player = transform[i].position;
-        under_player.y -= transform[i].size.y;
-        f32 distance_to_ground = roundf(under_player.y) - transform[i].position.y;
-        controller[i].grounded = get_tile(state, under_player).type != TILE_NONE && distance_to_ground >= -1.0f;
+        controller[i].grounded = is_grounded(state, transform[i]);
         if (controller[i].grounded) {
             controller[i].flight_time = controller[i].max_flight_time;
         }
@@ -590,7 +603,9 @@ void entity_to_entity_collision(GameState *state) {
 void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy) {
     ECS *ecs = state->ecs;
 
-    is_grounded(state, *transform);
+    PhysicsBody *body = entity_get_component(ecs, slime, PhysicsBody);
+    // Deceleration
+    body->velocity.x = lerp(body->velocity.x, 0.0f, state->dt*2.0f);
 
     // Sarch for target
     Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
@@ -603,44 +618,51 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
     }
     vec_free(near);
 
-    if (enemy->target == (Entity) -1) {
-        return;
-    }
-
-    // Shoot towards target
-    enemy->shoot_timer += state->dt;
-    if (enemy->shoot_timer >= enemy->shoot_delay) {
-        enemy->shoot_timer = 0.0f;
-
+    if (enemy->target != (Entity) -1) {
         Transform *target_transform = entity_get_component(ecs, enemy->target, Transform);
-        Vec2 dir = vec2_sub(target_transform->position, transform->position);
-        dir = vec2_normalized(dir);
-        dir = vec2_muls(dir, 20.0f);
 
-        Entity proj = ecs_entity(ecs);
-        entity_add_component(ecs, proj, Transform, {
-                .position = transform->position,
-                .size = vec2s(0.5f),
-            });
-        entity_add_component(ecs, proj, Renderable, {
-                .color = color_hsv(60.0f, 0.75f, 1.0f),
-            });
-        entity_add_component(ecs, proj, Projectile, {
-                .friendly = false,
-                .env_collide = false,
-                .penetration = 1,
-                .lifespan = 3.0f,
-            });
-        entity_add_component(ecs, proj, PhysicsBody, {
-                .gravity_multiplier = 0.0f,
-                .velocity = dir,
-                .tile_collision_cbs = {
-                    projectile_tile_collision
-                },
-                .entity_collision_cbs = {
-                    projectile_entity_collision
-                },
-            });
+        // Jumping
+        enemy->jump_timer += state->dt;
+        if (is_grounded(state, *transform) && enemy->jump_timer >= enemy->jump_delay) {
+            enemy->jump_timer = 0.0f;
+            f32 target_dir = target_transform->position.x - transform->position.x;
+            body->velocity = vec2(20.0f*sign(target_dir), 50.0f);
+        }
+
+        // Shoot towards target
+        enemy->shoot_timer += state->dt;
+        if (enemy->shoot_timer >= enemy->shoot_delay) {
+            enemy->shoot_timer = 0.0f;
+
+            Vec2 dir = vec2_sub(target_transform->position, transform->position);
+            dir = vec2_normalized(dir);
+            dir = vec2_muls(dir, 20.0f);
+
+            Entity proj = ecs_entity(ecs);
+            entity_add_component(ecs, proj, Transform, {
+                    .position = transform->position,
+                    .size = vec2s(0.5f),
+                });
+            entity_add_component(ecs, proj, Renderable, {
+                    .color = color_hsv(60.0f, 0.75f, 1.0f),
+                });
+            entity_add_component(ecs, proj, Projectile, {
+                    .friendly = false,
+                    .env_collide = false,
+                    .penetration = 1,
+                    .lifespan = 3.0f,
+                });
+            entity_add_component(ecs, proj, PhysicsBody, {
+                    .gravity_multiplier = 0.0f,
+                    .velocity = dir,
+                    .tile_collision_cbs = {
+                        projectile_tile_collision
+                    },
+                    .entity_collision_cbs = {
+                        projectile_entity_collision
+                    },
+                });
+        }
     }
     enemy->target = -1;
 }
@@ -830,6 +852,7 @@ i32 main(void) {
             .health = 100,
             .target = -1,
             .shoot_delay = 1.0f,
+            .jump_delay = 2.0f,
         });
 
     u32 fps = 0;
