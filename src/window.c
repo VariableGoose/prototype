@@ -16,6 +16,11 @@ struct Window {
     Allocator allocator;
     GLFWwindow *handle;
     Ivec2 size;
+    struct {
+        Ivec2 prev_size;
+        Ivec2 prev_pos;
+        b8 is_fullscreen;
+    } fullscreen;
 
     KeyMod mods;
     KeyState keyboard[KEY_COUNT];
@@ -103,6 +108,35 @@ void window_free(Window *window) {
 void window_set_vsync(Window *window, b8 vsync) {
     (void) window;
     glfwSwapInterval(vsync);
+}
+
+void window_set_fullscreen(Window *window, b8 fullscreen) {
+    if (window->fullscreen.is_fullscreen == fullscreen) {
+        return;
+    }
+
+    if (fullscreen) {
+        glfwGetWindowPos(window->handle, &window->fullscreen.prev_pos.x, &window->fullscreen.prev_pos.y);
+        glfwGetWindowSize(window->handle, &window->fullscreen.prev_size.x, &window->fullscreen.prev_size.y);
+
+        GLFWmonitor *primary = glfwGetPrimaryMonitor();
+        const GLFWvidmode *mode = glfwGetVideoMode(primary);
+        glfwSetWindowMonitor(window->handle, primary, 0, 0, mode->width, mode->height, mode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(window->handle,
+                NULL,
+                window->fullscreen.prev_pos.x,
+                window->fullscreen.prev_pos.y,
+                window->fullscreen.prev_size.x,
+                window->fullscreen.prev_size.y,
+                0);
+    }
+
+    window->fullscreen.is_fullscreen = fullscreen;
+}
+
+void window_toggle_fullscreen(Window *window) {
+    window_set_fullscreen(window, !window->fullscreen.is_fullscreen);
 }
 
 void window_poll_event(Window *window) {

@@ -14,8 +14,8 @@
 
 typedef AABB Transform;
 
-typedef struct PlayerController PlayerController;
-struct PlayerController {
+typedef struct Player Player;
+struct Player {
     struct {
         f32 horizontal;
         b8 jumping;
@@ -277,6 +277,22 @@ static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, Min
     }
 }
 
+b8 is_grounded(GameState *state, Transform transform) {
+    Vec2 half_size = aabb_half_size(transform);
+    Vec2 under = transform.position;
+    under.y -= half_size.y;
+
+    state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
+        .aabb = {
+            .position = under,
+            .size = vec2s(0.5f),
+        },
+        .color = COLOR_RED,
+    };
+
+    return false;
+}
+
 // -- Systems ------------------------------------------------------------------
 
 void template_system(ECS *ecs, QueryIter iter, void *user_ptr) {
@@ -292,7 +308,7 @@ void player_input_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
     GameState *state = user_ptr;
 
-    PlayerController *controller = ecs_query_iter_get_field(iter, 0);
+    Player *controller = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
         controller[i].input.horizontal = 0.0f;
         controller[i].input.horizontal -= key_down(state->window, KEY_A);
@@ -310,7 +326,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     (void) ecs;
     GameState *state = user_ptr;
 
-    PlayerController *controller = ecs_query_iter_get_field(iter, 0);
+    Player *controller = ecs_query_iter_get_field(iter, 0);
     PhysicsBody *body = ecs_query_iter_get_field(iter, 1);
     Transform *transform = ecs_query_iter_get_field(iter, 2);
     for (u32 i = 0; i < iter.count; i++) {
@@ -574,10 +590,12 @@ void entity_to_entity_collision(GameState *state) {
 void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy) {
     ECS *ecs = state->ecs;
 
+    is_grounded(state, *transform);
+
     // Sarch for target
     Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
     for (u32 i = 0; i < vec_len(near); i++) {
-        PlayerController *player = entity_get_component(ecs, near[i], PlayerController);
+        Player *player = entity_get_component(ecs, near[i], Player);
         if (player != NULL) {
             enemy->target = near[i];
             break;
@@ -678,7 +696,7 @@ void setup_ecs(GameState *state) {
     state->group = ecs_system_group(state->ecs);
 
     ecs_register_component(state->ecs, Transform);
-    ecs_register_component(state->ecs, PlayerController);
+    ecs_register_component(state->ecs, Player);
     ecs_register_component(state->ecs, Renderable);
     ecs_register_component(state->ecs, PhysicsBody);
     ecs_register_component(state->ecs, Projectile);
@@ -687,14 +705,14 @@ void setup_ecs(GameState *state) {
     ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
-                [0] = ecs_id(state->ecs, PlayerController),
+                [0] = ecs_id(state->ecs, Player),
                 QUERY_FIELDS_END,
             },
         });
     ecs_register_system(state->ecs, player_control_system, state->group, (QueryDesc) {
             .user_ptr = state,
             .fields = {
-                [0] = ecs_id(state->ecs, PlayerController),
+                [0] = ecs_id(state->ecs, Player),
                 [1] = ecs_id(state->ecs, PhysicsBody),
                 [2] = ecs_id(state->ecs, Transform),
                 QUERY_FIELDS_END,
@@ -713,7 +731,7 @@ void setup_ecs(GameState *state) {
             .user_ptr = state,
             .fields = {
                 [0] = ecs_id(state->ecs, Transform),
-                [1] = ecs_id(state->ecs, PlayerController),
+                [1] = ecs_id(state->ecs, Player),
                 QUERY_FIELDS_END,
             },
         });
@@ -771,7 +789,7 @@ i32 main(void) {
             .position = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
             .size = vec2(1.0f, 1.0f),
         });
-    entity_add_component(game_state.ecs, player, PlayerController, {
+    entity_add_component(game_state.ecs, player, Player, {
             .acceleration = 5.0f,
             .deceleration = 40.0f,
             .max_horizontal_speed = 30.0f,
@@ -796,7 +814,7 @@ i32 main(void) {
     Entity slime = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, slime, Transform, {
             .position = vec2(WORLD_WIDTH/2.0f + 8, WORLD_HEIGHT/8.0f),
-            .size = vec2(1.0f, 1.0f),
+            .size = vec2(2.0f, 3.0f),
         });
     entity_add_component(game_state.ecs, slime, Renderable, {
             .color = color_hsv(90.0f, 0.75f, 1.0f),
@@ -811,7 +829,7 @@ i32 main(void) {
             .ai = ENEMY_AI_SLIME,
             .health = 100,
             .target = -1,
-            .shoot_delay = 0.5f,
+            .shoot_delay = 1.0f,
         });
 
     u32 fps = 0;
@@ -928,6 +946,10 @@ i32 main(void) {
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
+
+        if (key_press(game_state.window, KEY_F11)) {
+            window_toggle_fullscreen(game_state.window);
+        }
 
         window_poll_event(game_state.window);
         window_swap_buffers(game_state.window);
