@@ -21,6 +21,8 @@ Vec2 world_to_screen_space(Camera camera, Vec2 world) {
     f32 aspect = (f32) camera.screen_size.x / (f32) camera.screen_size.y;
     f32 zoom = camera.zoom / 2.0f;
     world = vec2_sub(world, camera.position);
+    world = vec2_mul(world, vec2(1.0f, -1.0f));
+    world = vec2_div(world, camera.direction);
     Mat4 projection = mat4_ortho_projection(-aspect*zoom, aspect*zoom, zoom, -zoom, 1.0f, -1.0f);
     Vec4 normalized = mat4_mul_vec(projection, vec4(world.x, world.y, 0.0f, 1.0f));
     Vec2 screen = vec2(normalized.x*camera.screen_size.x/2.0f, normalized.y*camera.screen_size.y/2.0f);

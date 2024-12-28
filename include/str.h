@@ -12,7 +12,7 @@ struct Str {
 };
 
 #define str(data, len) ((Str) {data, len})
-#define cstr(str) ((Str) {str, strlen(str)})
+#define str_cstr(str) ((Str) {(const u8 *) str, strlen(str)})
 #define str_lit(str) ((Str) {(const u8 *) (str), sizeof(str)-1})
 #define str_arg(str) (int) (str).len, (str).data
 

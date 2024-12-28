@@ -3,6 +3,7 @@
 #include "core.h"
 #include "window.h"
 #include "ds.h"
+#include <stdio.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -73,12 +74,17 @@ typedef enum {
 typedef struct Enemy Enemy;
 struct Enemy {
     EnemyAI ai;
-    i32 health;
     Entity target;
     f32 shoot_timer;
     f32 shoot_delay;
     f32 jump_timer;
     f32 jump_delay;
+};
+
+typedef struct Health Health;
+struct Health {
+    i32 max;
+    i32 curr;
 };
 
 // -----------------------------------------------------------------------------
@@ -266,16 +272,19 @@ static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, Min
     Projectile *proj = entity_get_component(ecs, self, Projectile);
     if (proj->friendly) {
         Enemy *enemy = entity_get_component(ecs, other, Enemy);
+        Health *health = entity_get_component(ecs, other, Health);
         if (enemy == NULL) {
             return;
         }
         proj->penetration -= 1;
-        enemy->health -= proj->damage;
+
+        if (health != NULL) {
+            health->curr -= proj->damage;
+        }
 
         if (proj->penetration == 0) {
             ecs_entity_kill(ecs, self);
         }
-        log_debug("Hit enemy");
     }
 }
 
@@ -419,6 +428,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                     .env_collide = true,
                     .penetration = 1,
                     .lifespan = 3.0f,
+                    .damage = 5,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
                     .gravity_multiplier = 0.0f,
@@ -512,7 +522,7 @@ void tile_collision_system(ECS *ecs, QueryIter iter, void *user_ptr) {
                 MinkowskiDifference diff = aabb_minkowski_difference(transform[i], tile_transform);
                 if (diff.is_overlapping) {
                     transform[i].position = vec2_sub(transform[i].position, diff.depth);
-                    if (diff.normal.y == -1.0f) {
+                    if (diff.normal.y <= -1.0f) {
                         body[i].velocity.y = 0.0f;
                     }
 
@@ -573,15 +583,6 @@ void entity_to_entity_collision(GameState *state) {
                     continue;
                 }
 
-                state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                    .aabb = *(AABB *) &a_transform,
-                    .color = COLOR_RED,
-                };
-                state->debug_draw[state->debug_draw_i++] = (DebugDraw) {
-                    .aabb = *(AABB *) &b_transform,
-                    .color = COLOR_BLUE,
-                };
-
                 for (u32 l = 0; l < arrlen(a_body->entity_collision_cbs); l++) {
                     if (a_body->entity_collision_cbs[l] == NULL) {
                         break;
@@ -608,17 +609,17 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
     body->velocity.x = lerp(body->velocity.x, 0.0f, state->dt*2.0f);
 
     // Sarch for target
-    Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
-    for (u32 i = 0; i < vec_len(near); i++) {
-        Player *player = entity_get_component(ecs, near[i], Player);
-        if (player != NULL) {
-            enemy->target = near[i];
-            break;
+    if (enemy->target == (Entity) -1) {
+        Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
+        for (u32 i = 0; i < vec_len(near); i++) {
+            Player *player = entity_get_component(ecs, near[i], Player);
+            if (player != NULL) {
+                enemy->target = near[i];
+                break;
+            }
         }
-    }
-    vec_free(near);
-
-    if (enemy->target != (Entity) -1) {
+        vec_free(near);
+    } else {
         Transform *target_transform = entity_get_component(ecs, enemy->target, Transform);
 
         // Jumping
@@ -664,7 +665,6 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
                 });
         }
     }
-    enemy->target = -1;
 }
 
 void enemy_ai(ECS *ecs, QueryIter iter, void *user_ptr) {
@@ -681,6 +681,19 @@ void enemy_ai(ECS *ecs, QueryIter iter, void *user_ptr) {
             case ENEMY_AI_SLIME:
                 slime_ai(state, ent, transform, enemy);
                 break;
+        }
+    }
+}
+
+void health_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    (void) user_ptr;
+
+    Health *h = ecs_query_iter_get_field(iter, 0);
+    for (u32 i = 0; i < iter.count; i++) {
+        h->curr = clamp(h->curr, 0, h->max);
+        if (h->curr <= 0) {
+            Entity ent = ecs_query_iter_get_entity(iter, i);
+            ecs_entity_kill(ecs, ent);
         }
     }
 }
@@ -723,6 +736,7 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, PhysicsBody);
     ecs_register_component(state->ecs, Projectile);
     ecs_register_component(state->ecs, Enemy);
+    ecs_register_component(state->ecs, Health);
 
     ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
             .user_ptr = state,
@@ -767,6 +781,14 @@ void setup_ecs(GameState *state) {
             },
         });
 
+    ecs_register_system(state->ecs, health_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Health),
+                QUERY_FIELDS_END,
+            },
+        });
+
     // Physics should be run last because the spatial partitioning won't be
     // correct otherwise.
     ecs_register_system(state->ecs, physics_system, state->group, (QueryDesc) {
@@ -789,11 +811,12 @@ void setup_ecs(GameState *state) {
 
 void setup_world(GameState *state) {
     for (u32 x = 0; x < WORLD_WIDTH; x++) {
-        u32 y = (sinf(rad(x))+1.0f)*5.0f;
+        // u32 y = (sinf(rad(x))+1.0f)*5.0f;
+        u32 y = 0;
         state->tiles[x+y*WORLD_WIDTH] = (Tile) {
             .type = TILE_GROUND,
-            // .color = color_hsv(x*10.0f, 0.75f, 0.5f),
-            .color = color_rgb_hex(0x212121)
+            .color = color_hsv(x*10.0f, 0.75f, 0.5f),
+            // .color = color_rgb_hex(0x212121)
         };
     }
 }
@@ -832,6 +855,10 @@ i32 main(void) {
             .is_static = false,
             .collider = true,
         });
+    entity_add_component(game_state.ecs, player, Health, {
+            .max = 100,
+            .curr = 100,
+        });
 
     Entity slime = ecs_entity(game_state.ecs);
     entity_add_component(game_state.ecs, slime, Transform, {
@@ -849,10 +876,13 @@ i32 main(void) {
         });
     entity_add_component(game_state.ecs, slime, Enemy, {
             .ai = ENEMY_AI_SLIME,
-            .health = 100,
             .target = -1,
             .shoot_delay = 1.0f,
             .jump_delay = 2.0f,
+        });
+    entity_add_component(game_state.ecs, slime, Health, {
+            .max = 100,
+            .curr = 100,
         });
 
     u32 fps = 0;
@@ -876,7 +906,6 @@ i32 main(void) {
 
         // Game logic
         game_state.debug_draw_i = 0;
-
         {
             grid_clear(&game_state.grid);
             Query query = ecs_query(game_state.ecs, (QueryDesc) {
@@ -929,7 +958,6 @@ i32 main(void) {
                     QUERY_FIELDS_END,
                 },
             });
-
         for (u32 i = 0; i < query.count; i++) {
             QueryIter iter = ecs_query_get_iter(query, i);
             Transform *t = ecs_query_iter_get_field(iter, 0);
@@ -966,6 +994,68 @@ i32 main(void) {
         renderer_begin(game_state.renderer, screen_cam);
 
         renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
+
+        // Health
+        query = ecs_query(game_state.ecs, (QueryDesc) {
+                .fields = {
+                    ecs_id(game_state.ecs, Transform),
+                    ecs_id(game_state.ecs, Health),
+                    QUERY_FIELDS_END,
+                },
+            });
+        for (u32 i = 0; i < query.count; i++) {
+            QueryIter iter = ecs_query_get_iter(query, i);
+            Transform *t = ecs_query_iter_get_field(iter, 0);
+            Health *h = ecs_query_iter_get_field(iter, 1);
+            for (u32 j = 0; j < iter.count; j++) {
+                Vec2 half_size = aabb_half_size(*t);
+                Vec2 over_entity = t->position;
+                over_entity.y += half_size.y;
+
+                Vec2 screen_pos = world_to_screen_space(game_state.cam, over_entity);
+                screen_pos.y -= 10.0f;
+
+                Vec2 bar_size = vec2(50.0f, 5.0f);
+
+                // Border
+                f32 border_padding = 1;
+                screen_pos.y += border_padding;
+                renderer_draw_aabb(game_state.renderer, (AABB) {
+                        .position = screen_pos,
+                        .size = vec2_adds(bar_size, border_padding*2.0f),
+                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, COLOR_BLACK);
+                screen_pos.y -= border_padding;
+                // Max health
+                renderer_draw_aabb(game_state.renderer, (AABB) {
+                        .position = screen_pos,
+                        .size = bar_size,
+                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0x1c0806));
+                // Current health
+                f32 percentage = (f32) h->curr / (f32) h->max;
+                bar_size.x *= percentage;
+                renderer_draw_aabb(game_state.renderer, (AABB) {
+                        .position = screen_pos,
+                        .size = bar_size,
+                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0xff4330));
+
+                // Text
+                f32 text_size = 16.0f;
+                char health_cstr[32] = {0};
+                // snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h->max, h->max);
+                snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h->curr, h->max);
+                Ivec2 health_text_size = font_measure_string(font, str_cstr(health_cstr), text_size);
+                screen_pos.y -= bar_size.y;
+                screen_pos.x -= health_text_size.x / 2.0f;
+                screen_pos.y -= health_text_size.y;
+                renderer_draw_string(game_state.renderer,
+                        str_cstr(health_cstr),
+                        font,
+                        text_size,
+                        ivec2(vec2_arg(screen_pos)),
+                        COLOR_WHITE);
+            }
+        }
+        ecs_query_free(game_state.ecs, query);
 
         renderer_end(game_state.renderer);
         renderer_submit(game_state.renderer);
