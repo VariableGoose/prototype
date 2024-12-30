@@ -108,6 +108,8 @@ struct Boss {
     f32 attack_timer;
     b8 shielded;
     Vec(Entity) shields;
+    // ttr = taste the rainbow
+    u32 ttr_circle_count;
 };
 
 // -----------------------------------------------------------------------------
@@ -701,16 +703,17 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
                     .size = vec2s(0.5f),
                 });
             entity_add_component(ecs, proj, Renderable, {
-                    .color = color_hsv(60.0f, 0.75f, 1.0f),
+                    .color = color_rgb_hex(0xfcba03),
                 });
             entity_add_component(ecs, proj, Projectile, {
                     .friendly = false,
-                    .env_collide = false,
+                    .env_collide = true,
                     .penetration = 1,
                     .lifespan = 3.0f,
-                    .damage = 20,
+                    .damage = 2,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
+                    .collider = true,
                     .gravity_multiplier = 0.0f,
                     .velocity = dir,
                     .tile_collision_cbs = {
@@ -755,7 +758,6 @@ void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enem
         dir = vec2_muls(dir, 100.0f);
         body->velocity = dir;
     } else {
-        log_debug("Here");
         body->velocity = vec2s(0.0f);
     }
 
@@ -794,9 +796,10 @@ void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enem
     }
 
     boss->attack_timer += state->dt;
-    if (boss->attack_timer >= 4.0f) {
+    if (boss->attack_timer >= 10.0f) {
         body->velocity = vec2s(0.0f);
         boss->attack_timer = 0.0f;
+        enemy->shoot_timer = 0.0f;
         boss->attack = BOSS_ATTACK_SHIELD;
     }
 }
@@ -823,6 +826,33 @@ Entity spawn_shield(ECS *ecs, Vec2 pos) {
     return ent;
 }
 
+void spawn_slime(ECS *ecs, Vec2 pos, f32 jump_delay) {
+    Entity ent = ecs_entity(ecs);
+    Vec2 dir = vec2(cosf(jump_delay), sinf(jump_delay));
+    dir = vec2_muls(dir, 25.0f);
+    entity_add_component(ecs, ent, Transform, {
+            .position = pos,
+            .size = vec2s(1.0f),
+        });
+    entity_add_component(ecs, ent, Renderable, {
+            .color = color_rgb_hex(0xfcba03),
+        });
+    entity_add_component(ecs, ent, Enemy, {
+            .ai = ENEMY_AI_SLIME,
+            .jump_delay = jump_delay,
+            .shoot_delay = 1.0f,
+        });
+    entity_add_component(ecs, ent, Health, {
+            .max = 25.0f,
+            .curr = 25.0f,
+        });
+    entity_add_component(ecs, ent, PhysicsBody, {
+            .collider = true,
+            .velocity = dir,
+            .gravity_multiplier = 10.0f,
+        });
+}
+
 void attack_shield(GameState *state, Entity ent, Transform *transform, Enemy *enemy, Boss *boss) {
     ECS *ecs = state->ecs;
 
@@ -832,7 +862,7 @@ void attack_shield(GameState *state, Entity ent, Transform *transform, Enemy *en
         renderable->color = color_rgb_hex(0x19161f);
         enemy->invincible = true;
 
-        const u32 shield_count = 4;
+        const u32 shield_count = 6;
         for (u32 i = 0; i < shield_count; i++) {
             const f32 radius = 10.0f;
             Vec2 shield_pos = transform->position;
@@ -840,6 +870,11 @@ void attack_shield(GameState *state, Entity ent, Transform *transform, Enemy *en
             shield_pos.y += sinf((2.0f * PI / shield_count) * i) * radius;
             Entity shield_ent = spawn_shield(ecs, shield_pos);
             vec_push(boss->shields, shield_ent);
+        }
+
+        const u32 slime_count = 4;
+        for (u32 i = 0; i < slime_count; i++) {
+            spawn_slime(ecs, transform->position, 1.0f + 0.25f * (i + 1));
         }
     }
 
@@ -857,6 +892,73 @@ void attack_shield(GameState *state, Entity ent, Transform *transform, Enemy *en
         renderable->color = color_rgb_hex(0x4e03fc);
         enemy->invincible = false;
         boss->attack = BOSS_ATTACK_TASTE_THE_RAINBOW;
+    }
+}
+
+void attack_taste_the_rainbow(GameState *state, Entity ent, Transform *transform, Enemy *enemy, Boss *boss) {
+    ECS *ecs = state->ecs;
+    PhysicsBody *body = entity_get_component(ecs, ent, PhysicsBody);
+
+    const f32 epsilon = 0.01f;
+    const Vec2 target_pos = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f);
+    if (fabsf(target_pos.x - transform->position.x) > epsilon ||
+        fabsf(target_pos.y - transform->position.y) > epsilon) {
+        Vec2 dir = vec2_sub(target_pos, transform->position);
+        dir = vec2_normalized(dir);
+        dir = vec2_muls(dir, 100.0f);
+        body->velocity = dir;
+        return;
+    }
+    body->velocity = vec2s(0.0f);
+
+    const u32 circle_count = 32;
+    enemy->shoot_timer += state->dt;
+    if (enemy->shoot_timer >= 0.1f) {
+        enemy->shoot_timer = 0.0f;
+
+        boss->ttr_circle_count++;
+
+        const u32 proj_count = 16;
+        for (u32 i = 0; i < proj_count; i++) {
+            Entity proj = ecs_entity(ecs);
+            Color color = color_hsv(360.0f / proj_count * i, 0.75f, 1.0f);
+
+            f32 angle_a = 2.0f * PI / proj_count * i;
+            f32 angle_b = (PI/12.0f) * boss->ttr_circle_count;
+            Vec2 dir = vec2(cosf(angle_a + angle_b), sinf(angle_a + angle_b));
+            dir = vec2_muls(dir, 25.0f);
+
+            entity_add_component(ecs, proj, Transform, {
+                    .position = transform->position,
+                    .size = vec2s(0.5f),
+                });
+            entity_add_component(ecs, proj, Renderable, {
+                    .color = color,
+                });
+            entity_add_component(ecs, proj, Projectile, {
+                    .friendly = false,
+                    .env_collide = true,
+                    .penetration = 1,
+                    .lifespan = 10.0f,
+                    .damage = 5,
+                });
+            entity_add_component(ecs, proj, PhysicsBody, {
+                    .gravity_multiplier = 0.0f,
+                    .velocity = dir,
+                    .collider = true,
+                    .tile_collision_cbs = {
+                        projectile_tile_collision
+                    },
+                    .entity_collision_cbs = {
+                        projectile_entity_collision
+                    },
+                });
+        }
+    }
+
+    if (boss->ttr_circle_count == circle_count) {
+        boss->ttr_circle_count = 0;
+        boss->attack = BOSS_ATTACK_CARPET_BOMB;
     }
 }
 
@@ -889,6 +991,7 @@ void boss_ai(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
             attack_shield(state, ent, transform, enemy, boss);
             break;
         case BOSS_ATTACK_TASTE_THE_RAINBOW:
+            attack_taste_the_rainbow(state, ent, transform, enemy, boss);
             break;
     }
 }
@@ -905,10 +1008,10 @@ void enemy_ai(ECS *ecs, QueryIter iter, void *user_ptr) {
             case ENEMY_AI_NONE:
                 break;
             case ENEMY_AI_SLIME:
-                slime_ai(state, ent, transform, enemy);
+                slime_ai(state, ent, &transform[i], &enemy[i]);
                 break;
             case ENEMY_AI_BOSS:
-                boss_ai(state, ent, transform, enemy);
+                boss_ai(state, ent, &transform[i], &enemy[i]);
                 break;
         }
     }
@@ -1074,10 +1177,8 @@ void setup_ecs(GameState *state) {
 void setup_world(GameState *state) {
     for (u32 y = 0; y < 5; y++) {
         for (u32 x = 0; x < WORLD_WIDTH; x++) {
-            // u32 y = (sinf(rad(x))+1.0f)*5.0f;
             state->tiles[x+y*WORLD_WIDTH] = (Tile) {
                 .type = TILE_GROUND,
-                    // .color = color_hsv((y+x)*10.0f, 0.75f, 1.0f),
                     .color = color_rgb_hex(0x212121)
             };
         }
@@ -1100,8 +1201,8 @@ void setup_boss(ECS *ecs) {
             .collider = true,
         });
     entity_add_component(ecs, boss, Health, {
-            .max = 1000,
-            .curr = 1000,
+            .max = 500,
+            .curr = 500,
         });
     entity_add_component(ecs, boss, Enemy, {
             .ai = ENEMY_AI_BOSS,
@@ -1116,6 +1217,7 @@ i32 main(void) {
     setup_ecs(&game_state);
     setup_world(&game_state);
     window_set_vsync(game_state.window, false);
+    window_set_fullscreen(game_state.window, true);
 
     Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
 
