@@ -87,6 +87,13 @@ struct Health {
     i32 curr;
 };
 
+typedef struct Hit Hit;
+struct Hit {
+    Color color;
+    i32 damage;
+    f32 timer;
+};
+
 // -----------------------------------------------------------------------------
 
 typedef enum {
@@ -270,6 +277,8 @@ static void projectile_tile_collision(ECS *ecs, Entity self, Vec2 tile_position,
 static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, MinkowskiDifference manifold) {
     (void) manifold;
     Projectile *proj = entity_get_component(ecs, self, Projectile);
+    Transform *proj_transform = entity_get_component(ecs, self, Transform);
+
     if (proj->friendly) {
         Enemy *enemy = entity_get_component(ecs, other, Enemy);
         Health *health = entity_get_component(ecs, other, Health);
@@ -280,6 +289,37 @@ static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, Min
 
         if (health != NULL) {
             health->curr -= proj->damage;
+            Entity hit = ecs_entity(ecs);
+            entity_add_component(ecs, hit, Transform, {
+                    .position = proj_transform->position,
+                });
+            entity_add_component(ecs, hit, Hit, {
+                    .damage = proj->damage,
+                    .color = COLOR_RED,
+                });
+        }
+
+        if (proj->penetration == 0) {
+            ecs_entity_kill(ecs, self);
+        }
+    } else {
+        Player *player = entity_get_component(ecs, other, Player);
+        Health *health = entity_get_component(ecs, other, Health);
+        if (player == NULL) {
+            return;
+        }
+        proj->penetration -= 1;
+
+        if (health != NULL) {
+            health->curr -= proj->damage;
+            Entity hit = ecs_entity(ecs);
+            entity_add_component(ecs, hit, Transform, {
+                    .position = proj_transform->position,
+                });
+            entity_add_component(ecs, hit, Hit, {
+                    .damage = proj->damage,
+                    .color = COLOR_RED,
+                });
         }
 
         if (proj->penetration == 0) {
@@ -698,6 +738,27 @@ void health_system(ECS *ecs, QueryIter iter, void *user_ptr) {
     }
 }
 
+static f32 ease_out_sine(f32 x) {
+    return sinf(x * PI / 2.0f);
+}
+
+void hit_system(ECS *ecs, QueryIter iter, void *user_ptr) {
+    GameState *state = user_ptr;
+
+    Hit *h = ecs_query_iter_get_field(iter, 0);
+    Transform *t = ecs_query_iter_get_field(iter, 1);
+    for (u32 i = 0; i < iter.count; i++) {
+        f32 life = 0.5f;
+        f32 ease = ease_out_sine(h[i].timer/life * PI/2.0f) * 15.0f * state->dt;
+        t[i].position.y += ease;
+        h[i].timer += state->dt;
+        if (h[i].timer >= life) {
+            Entity ent = ecs_query_iter_get_entity(iter, i);
+            ecs_entity_kill(ecs, ent);
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 GameState game_state_new(void) {
@@ -737,6 +798,7 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, Projectile);
     ecs_register_component(state->ecs, Enemy);
     ecs_register_component(state->ecs, Health);
+    ecs_register_component(state->ecs, Hit);
 
     ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
             .user_ptr = state,
@@ -789,6 +851,16 @@ void setup_ecs(GameState *state) {
             },
         });
 
+    ecs_register_system(state->ecs, hit_system, state->group, (QueryDesc) {
+            .user_ptr = state,
+            .fields = {
+                [0] = ecs_id(state->ecs, Hit),
+                [1] = ecs_id(state->ecs, Transform),
+                QUERY_FIELDS_END,
+            },
+        });
+
+
     // Physics should be run last because the spatial partitioning won't be
     // correct otherwise.
     ecs_register_system(state->ecs, physics_system, state->group, (QueryDesc) {
@@ -810,14 +882,15 @@ void setup_ecs(GameState *state) {
 }
 
 void setup_world(GameState *state) {
-    for (u32 x = 0; x < WORLD_WIDTH; x++) {
-        // u32 y = (sinf(rad(x))+1.0f)*5.0f;
-        u32 y = 0;
-        state->tiles[x+y*WORLD_WIDTH] = (Tile) {
-            .type = TILE_GROUND,
-            .color = color_hsv(x*10.0f, 0.75f, 0.5f),
-            // .color = color_rgb_hex(0x212121)
-        };
+    for (u32 y = 0; y < 5; y++) {
+        for (u32 x = 0; x < WORLD_WIDTH; x++) {
+            // u32 y = (sinf(rad(x))+1.0f)*5.0f;
+            state->tiles[x+y*WORLD_WIDTH] = (Tile) {
+                .type = TILE_GROUND,
+                    .color = color_hsv((y+x)*10.0f, 0.75f, 1.0f),
+                    // .color = color_rgb_hex(0x212121)
+            };
+        }
     }
 }
 
@@ -881,8 +954,8 @@ i32 main(void) {
             .jump_delay = 2.0f,
         });
     entity_add_component(game_state.ecs, slime, Health, {
-            .max = 100,
-            .curr = 100,
+            .max = 1000,
+            .curr = 1000,
         });
 
     u32 fps = 0;
@@ -1009,7 +1082,7 @@ i32 main(void) {
             Health *h = ecs_query_iter_get_field(iter, 1);
             for (u32 j = 0; j < iter.count; j++) {
                 Vec2 half_size = aabb_half_size(*t);
-                Vec2 over_entity = t->position;
+                Vec2 over_entity = t[j].position;
                 over_entity.y += half_size.y;
 
                 Vec2 screen_pos = world_to_screen_space(game_state.cam, over_entity);
@@ -1031,7 +1104,7 @@ i32 main(void) {
                         .size = bar_size,
                     }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0x1c0806));
                 // Current health
-                f32 percentage = (f32) h->curr / (f32) h->max;
+                f32 percentage = (f32) h[j].curr / (f32) h[j].max;
                 bar_size.x *= percentage;
                 renderer_draw_aabb(game_state.renderer, (AABB) {
                         .position = screen_pos,
@@ -1041,8 +1114,7 @@ i32 main(void) {
                 // Text
                 f32 text_size = 16.0f;
                 char health_cstr[32] = {0};
-                // snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h->max, h->max);
-                snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h->curr, h->max);
+                snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h[j].curr, h[j].max);
                 Ivec2 health_text_size = font_measure_string(font, str_cstr(health_cstr), text_size);
                 screen_pos.y -= bar_size.y;
                 screen_pos.x -= health_text_size.x / 2.0f;
@@ -1053,6 +1125,38 @@ i32 main(void) {
                         text_size,
                         ivec2(vec2_arg(screen_pos)),
                         COLOR_WHITE);
+            }
+        }
+        ecs_query_free(game_state.ecs, query);
+
+        // :hit_text
+        query = ecs_query(game_state.ecs, (QueryDesc) {
+                .fields = {
+                    ecs_id(game_state.ecs, Transform),
+                    ecs_id(game_state.ecs, Hit),
+                    QUERY_FIELDS_END,
+                },
+            });
+        for (u32 i = 0; i < query.count; i++) {
+            QueryIter iter = ecs_query_get_iter(query, i);
+            Transform *t = ecs_query_iter_get_field(iter, 0);
+            Hit *h = ecs_query_iter_get_field(iter, 1);
+            for (u32 j = 0; j < iter.count; j++) {
+                Vec2 screen_pos = world_to_screen_space(game_state.cam, t[j].position);
+
+                // Text
+                f32 text_size = 16.0f;
+                char hit_str[32] = {0};
+                snprintf(hit_str, arrlen(hit_str), "%d", h[j].damage);
+                Ivec2 health_text_size = font_measure_string(font, str_cstr(hit_str), text_size);
+                screen_pos.x -= health_text_size.x / 2.0f;
+                screen_pos.y -= health_text_size.y / 2.0f;
+                renderer_draw_string(game_state.renderer,
+                        str_cstr(hit_str),
+                        font,
+                        text_size,
+                        ivec2(vec2_arg(screen_pos)),
+                        h->color);
             }
         }
         ecs_query_free(game_state.ecs, query);
