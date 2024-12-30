@@ -80,6 +80,7 @@ struct Enemy {
     f32 shoot_delay;
     f32 jump_timer;
     f32 jump_delay;
+    b8 invincible;
 };
 
 typedef struct Health Health;
@@ -104,6 +105,9 @@ typedef enum {
 typedef struct Boss Boss;
 struct Boss {
     BossAttack attack;
+    f32 attack_timer;
+    b8 shielded;
+    Vec(Entity) shields;
 };
 
 // -----------------------------------------------------------------------------
@@ -294,7 +298,7 @@ static void projectile_entity_collision(ECS *ecs, Entity self, Entity other, Min
     if (proj->friendly) {
         Enemy *enemy = entity_get_component(ecs, other, Enemy);
         Health *health = entity_get_component(ecs, other, Health);
-        if (enemy == NULL) {
+        if (enemy == NULL || enemy->invincible) {
             return;
         }
         proj->penetration -= 1;
@@ -720,7 +724,7 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
     }
 }
 
-void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
+void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enemy *enemy, Boss *boss) {
     ECS *ecs = state->ecs;
     PhysicsBody *body = entity_get_component(ecs, ent, PhysicsBody);
     Transform *target_transform = entity_get_component(ecs, enemy->target, Transform);
@@ -788,6 +792,72 @@ void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enem
                 },
             });
     }
+
+    boss->attack_timer += state->dt;
+    if (boss->attack_timer >= 4.0f) {
+        body->velocity = vec2s(0.0f);
+        boss->attack_timer = 0.0f;
+        boss->attack = BOSS_ATTACK_SHIELD;
+    }
+}
+
+Entity spawn_shield(ECS *ecs, Vec2 pos) {
+    Entity ent = ecs_entity(ecs);
+    entity_add_component(ecs, ent, Transform, {
+            .position = pos,
+            .size = vec2s(1.0f),
+        });
+    entity_add_component(ecs, ent, Renderable, {
+            .color = color_rgb_hex(0x9ed0ff),
+        });
+    entity_add_component(ecs, ent, Enemy, {0});
+    entity_add_component(ecs, ent, Health, {
+            .max = 25.0f,
+            .curr = 25.0f,
+        });
+    entity_add_component(ecs, ent, PhysicsBody, {
+            .collider = true,
+            .gravity_multiplier = 0.0f,
+        });
+
+    return ent;
+}
+
+void attack_shield(GameState *state, Entity ent, Transform *transform, Enemy *enemy, Boss *boss) {
+    ECS *ecs = state->ecs;
+
+    if (!boss->shielded) {
+        boss->shielded = true;
+        Renderable *renderable = entity_get_component(ecs, ent, Renderable);
+        renderable->color = color_rgb_hex(0x19161f);
+        enemy->invincible = true;
+
+        const u32 shield_count = 4;
+        for (u32 i = 0; i < shield_count; i++) {
+            const f32 radius = 10.0f;
+            Vec2 shield_pos = transform->position;
+            shield_pos.x += cosf((2.0f * PI / shield_count) * i) * radius;
+            shield_pos.y += sinf((2.0f * PI / shield_count) * i) * radius;
+            Entity shield_ent = spawn_shield(ecs, shield_pos);
+            vec_push(boss->shields, shield_ent);
+        }
+    }
+
+    b8 has_live_shields = false;
+    for (u32 i = 0; i < vec_len(boss->shields); i++) {
+        if (entity_alive(ecs, boss->shields[i])) {
+            has_live_shields = true;
+            break;
+        }
+    }
+
+    if (!has_live_shields) {
+        boss->shielded = false;
+        Renderable *renderable = entity_get_component(ecs, ent, Renderable);
+        renderable->color = color_rgb_hex(0x4e03fc);
+        enemy->invincible = false;
+        boss->attack = BOSS_ATTACK_TASTE_THE_RAINBOW;
+    }
 }
 
 void boss_ai(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
@@ -811,12 +881,12 @@ void boss_ai(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
         }
     }
 
-
     switch (boss->attack) {
         case BOSS_ATTACK_CARPET_BOMB:
-            attack_carpet_bomb(state, ent, transform, enemy);
+            attack_carpet_bomb(state, ent, transform, enemy, boss);
             break;
         case BOSS_ATTACK_SHIELD:
+            attack_shield(state, ent, transform, enemy, boss);
             break;
         case BOSS_ATTACK_TASTE_THE_RAINBOW:
             break;
@@ -849,8 +919,8 @@ void health_system(ECS *ecs, QueryIter iter, void *user_ptr) {
 
     Health *h = ecs_query_iter_get_field(iter, 0);
     for (u32 i = 0; i < iter.count; i++) {
-        h->curr = clamp(h->curr, 0, h->max);
-        if (h->curr <= 0) {
+        h[i].curr = clamp(h[i].curr, 0, h[i].max);
+        if (h[i].curr <= 0) {
             Entity ent = ecs_query_iter_get_entity(iter, i);
             ecs_entity_kill(ecs, ent);
         }
@@ -1007,8 +1077,8 @@ void setup_world(GameState *state) {
             // u32 y = (sinf(rad(x))+1.0f)*5.0f;
             state->tiles[x+y*WORLD_WIDTH] = (Tile) {
                 .type = TILE_GROUND,
-                    .color = color_hsv((y+x)*10.0f, 0.75f, 1.0f),
-                    // .color = color_rgb_hex(0x212121)
+                    // .color = color_hsv((y+x)*10.0f, 0.75f, 1.0f),
+                    .color = color_rgb_hex(0x212121)
             };
         }
     }
