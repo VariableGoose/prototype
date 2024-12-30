@@ -69,6 +69,7 @@ struct Projectile {
 typedef enum {
     ENEMY_AI_NONE,
     ENEMY_AI_SLIME,
+    ENEMY_AI_BOSS,
 } EnemyAI;
 
 typedef struct Enemy Enemy;
@@ -92,6 +93,17 @@ struct Hit {
     Color color;
     i32 damage;
     f32 timer;
+};
+
+typedef enum {
+    BOSS_ATTACK_CARPET_BOMB,
+    BOSS_ATTACK_SHIELD,
+    BOSS_ATTACK_TASTE_THE_RAINBOW,
+} BossAttack;
+
+typedef struct Boss Boss;
+struct Boss {
+    BossAttack attack;
 };
 
 // -----------------------------------------------------------------------------
@@ -692,6 +704,7 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
                     .env_collide = false,
                     .penetration = 1,
                     .lifespan = 3.0f,
+                    .damage = 20,
                 });
             entity_add_component(ecs, proj, PhysicsBody, {
                     .gravity_multiplier = 0.0f,
@@ -704,6 +717,109 @@ void slime_ai(GameState *state, Entity slime, Transform *transform, Enemy *enemy
                     },
                 });
         }
+    }
+}
+
+void attack_carpet_bomb(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
+    ECS *ecs = state->ecs;
+    PhysicsBody *body = entity_get_component(ecs, ent, PhysicsBody);
+    Transform *target_transform = entity_get_component(ecs, enemy->target, Transform);
+    PhysicsBody *target_body = entity_get_component(ecs, enemy->target, PhysicsBody);
+
+    Vec2 half_size = aabb_half_size(*transform);
+
+    // Move to target position
+    Vec2 target_pos = target_transform->position;
+    Vec2 target_half_size = aabb_half_size(*target_transform);
+    target_pos.y += target_half_size.y;
+    target_pos.y += half_size.y;
+    target_pos.y += 16;
+
+    f32 bomb_gravity_mult = 10.0f;
+    f32 bomb_v0 = 0.0f;
+    f32 dist_to_player = -fabsf(target_transform->position.x - transform->position.x);
+
+    f32 a = bomb_gravity_mult*state->gravity;
+    f32 t1 = -bomb_v0 / a + sqrtf(powf(bomb_v0 / a, 2.0f) + (2.0f * dist_to_player) / a);
+
+    target_pos.x += target_body->velocity.x * t1;
+
+    if (transform->position.x != target_pos.x ||
+            transform->position.y != target_pos.y) {
+        Vec2 dir = vec2_sub(target_pos, transform->position);
+        dir = vec2_normalized(dir);
+        dir = vec2_muls(dir, 100.0f);
+        body->velocity = dir;
+    } else {
+        log_debug("Here");
+        body->velocity = vec2s(0.0f);
+    }
+
+    // Drop bombs
+    enemy->shoot_timer += state->dt;
+    if (enemy->shoot_timer >= enemy->shoot_delay) {
+        enemy->shoot_timer = 0.0f;
+
+        Entity bomb = ecs_entity(ecs);
+        entity_add_component(ecs, bomb, Transform, {
+                .position = transform->position,
+                .size = vec2s(0.5f),
+            });
+        entity_add_component(ecs, bomb, Renderable, {
+                .color = color_rgb_hex(0x808080),
+            });
+        entity_add_component(ecs, bomb, Projectile, {
+                .friendly = false,
+                .env_collide = false,
+                .penetration = 1,
+                .lifespan = 3.0f,
+                .damage = 20,
+            });
+        entity_add_component(ecs, bomb, PhysicsBody, {
+                .gravity_multiplier = bomb_gravity_mult,
+                .velocity = {
+                    .y = bomb_v0,
+                },
+                .tile_collision_cbs = {
+                    projectile_tile_collision
+                },
+                .entity_collision_cbs = {
+                    projectile_entity_collision
+                },
+            });
+    }
+}
+
+void boss_ai(GameState *state, Entity ent, Transform *transform, Enemy *enemy) {
+    ECS *ecs = state->ecs;
+    Boss *boss = entity_get_component(ecs, ent, Boss);
+
+    // Find the target and never change.
+    if (enemy->target == (Entity) -1) {
+        Vec(Entity) near = grid_query_radius(&state->grid, ecs, transform->position, 30.0f);
+        for (u32 i = 0; i < vec_len(near); i++) {
+            Player *player = entity_get_component(ecs, near[i], Player);
+            if (player != NULL) {
+                enemy->target = near[i];
+                break;
+            }
+        }
+        vec_free(near);
+
+        if (enemy->target == (Entity) -1) {
+            return;
+        }
+    }
+
+
+    switch (boss->attack) {
+        case BOSS_ATTACK_CARPET_BOMB:
+            attack_carpet_bomb(state, ent, transform, enemy);
+            break;
+        case BOSS_ATTACK_SHIELD:
+            break;
+        case BOSS_ATTACK_TASTE_THE_RAINBOW:
+            break;
     }
 }
 
@@ -720,6 +836,9 @@ void enemy_ai(ECS *ecs, QueryIter iter, void *user_ptr) {
                 break;
             case ENEMY_AI_SLIME:
                 slime_ai(state, ent, transform, enemy);
+                break;
+            case ENEMY_AI_BOSS:
+                boss_ai(state, ent, transform, enemy);
                 break;
         }
     }
@@ -799,6 +918,7 @@ void setup_ecs(GameState *state) {
     ecs_register_component(state->ecs, Enemy);
     ecs_register_component(state->ecs, Health);
     ecs_register_component(state->ecs, Hit);
+    ecs_register_component(state->ecs, Boss);
 
     ecs_register_system(state->ecs, player_input_system, state->group, (QueryDesc) {
             .user_ptr = state,
@@ -894,6 +1014,33 @@ void setup_world(GameState *state) {
     }
 }
 
+void setup_boss(ECS *ecs) {
+    Entity boss = ecs_entity(ecs);
+    entity_add_component(ecs, boss, Transform, {
+            .position = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/2.0f),
+            .size = vec2(5.0f, 5.0f),
+        });
+    entity_add_component(ecs, boss, Renderable, {
+            .color = color_rgb_hex(0x4e03fc),
+            .texture = TEXTURE_NULL,
+        });
+    entity_add_component(ecs, boss, PhysicsBody, {
+            .gravity_multiplier = 0.0f,
+            .is_static = false,
+            .collider = true,
+        });
+    entity_add_component(ecs, boss, Health, {
+            .max = 1000,
+            .curr = 1000,
+        });
+    entity_add_component(ecs, boss, Enemy, {
+            .ai = ENEMY_AI_BOSS,
+            .target = -1,
+            .shoot_delay = 0.25f,
+        });
+    entity_add_component(ecs, boss, Boss, {});
+}
+
 i32 main(void) {
     GameState game_state = game_state_new();
     setup_ecs(&game_state);
@@ -933,30 +1080,7 @@ i32 main(void) {
             .curr = 100,
         });
 
-    Entity slime = ecs_entity(game_state.ecs);
-    entity_add_component(game_state.ecs, slime, Transform, {
-            .position = vec2(WORLD_WIDTH/2.0f + 8, WORLD_HEIGHT/8.0f),
-            .size = vec2(2.0f, 3.0f),
-        });
-    entity_add_component(game_state.ecs, slime, Renderable, {
-            .color = color_hsv(90.0f, 0.75f, 1.0f),
-            .texture = TEXTURE_NULL,
-        });
-    entity_add_component(game_state.ecs, slime, PhysicsBody, {
-            .gravity_multiplier = 10.0f,
-            .is_static = false,
-            .collider = true,
-        });
-    entity_add_component(game_state.ecs, slime, Enemy, {
-            .ai = ENEMY_AI_SLIME,
-            .target = -1,
-            .shoot_delay = 1.0f,
-            .jump_delay = 2.0f,
-        });
-    entity_add_component(game_state.ecs, slime, Health, {
-            .max = 1000,
-            .curr = 1000,
-        });
+    setup_boss(game_state.ecs);
 
     u32 fps = 0;
     f32 fps_timer = 0.0f;
