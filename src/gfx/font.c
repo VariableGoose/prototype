@@ -376,14 +376,14 @@ FontMetrics font_get_metrics(Font *font, u32 size) {
     return rigid->metrics;
 }
 
-Ivec2 font_measure_string(Font *font, Str str, u32 size) {
+Vec2 font_measure_string(Font *font, Str str, u32 size) {
     RigidFont *rigid = hash_map_getp(font->size_lookup, size);
     if (rigid == NULL) {
         font_cache_size(font, size);
         rigid = hash_map_getp(font->size_lookup, size);
     }
 
-    Ivec2 str_size = ivec2(0, rigid->metrics.ascent - rigid->metrics.descent);
+    Vec2 str_size = vec2(0.0f, rigid->metrics.ascent - rigid->metrics.descent);
     for (u64 i = 0; i < str.len; i++) {
         Glyph glyph = rigid->glyphs[hash_map_get(rigid->glyph_map, str.data[i])];
         str_size.x += glyph.advance;

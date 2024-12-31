@@ -236,6 +236,14 @@ Vec(Entity) grid_query_radius(SpatialGrid *grid, ECS *ecs, Vec2 pos, f32 radius)
     return result;
 }
 
+typedef enum {
+    STAGE_MAIN_MENU,
+    STAGE_IN_GAME,
+    STAGE_LOST,
+    STAGE_WON,
+    STAGE_QUIT,
+} Stage;
+
 typedef struct GameState GameState;
 struct GameState {
     ECS *ecs;
@@ -253,6 +261,9 @@ struct GameState {
 
     DebugDraw debug_draw[1024];
     u32 debug_draw_i;
+
+    Stage stage;
+    b8 paused;
 };
 
 Tile get_tile(GameState *state, Vec2 pos) {
@@ -471,7 +482,7 @@ void player_control_system(ECS *ecs, QueryIter iter, void *user_ptr) {
             Vec2 player = transform[i].position;
             Vec2 dir = vec2_sub(mouse, player);
             dir = vec2_normalized(dir);
-            dir = vec2_muls(dir, 30.0f);
+            dir = vec2_muls(dir, 100.0f);
 
             Entity proj = ecs_entity(ecs);
             entity_add_component(ecs, proj, Transform, {
@@ -1207,9 +1218,304 @@ void setup_boss(ECS *ecs) {
     entity_add_component(ecs, boss, Enemy, {
             .ai = ENEMY_AI_BOSS,
             .target = -1,
-            .shoot_delay = 0.25f,
+            .shoot_delay = 0.1f,
         });
     entity_add_component(ecs, boss, Boss, {});
+}
+
+b8 button(Renderer *renderer, Window *window, AABB box, Str str, Font *font, u32 font_size) {
+    Vec2 str_size = font_measure_string(font, str, font_size);
+    Vec2 half_size = aabb_half_size(box);
+    Vec2 pos = vec2_add(box.position, half_size);
+    pos = vec2_sub(pos, vec2_divs(str_size, 2.0f));
+
+    renderer_draw_aabb(renderer, box, vec2s(-1.0f), TEXTURE_NULL, COLOR_WHITE);
+    renderer_draw_string(renderer, str, font, font_size, pos, COLOR_BLACK);
+
+    AABB top_right = box;
+    top_right.position = vec2_add(top_right.position, half_size);
+
+    return mouse_button_press(window, MOUSE_BUTTON_LEFT) &&
+        aabb_overlap_point(top_right, mouse_position(window));
+}
+
+void main_menu(GameState *game_state, Font *font) {
+    Renderer *rend = game_state->renderer;
+
+    Ivec2 screen_size = window_get_size(game_state->window);
+    Camera screen_cam = {
+        .screen_size = screen_size,
+        .zoom = screen_size.y,
+        .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
+        .direction = vec2(1.0f, -1.0f),
+    };
+    renderer_begin(rend, screen_cam);
+
+    renderer_draw_string(rend, str_lit("Intense gaming"), font, 32.0f, vec2s(10.0f), COLOR_WHITE);
+
+    Str str = str_lit("Boss Prototype Thing");
+    Vec2 str_size = font_measure_string(font, str, 32);
+
+    Vec2 half_screen = vec2(screen_size.x/2.0f, screen_size.y/2.0f);
+    Vec2 size = vec2(str_size.x + 20.0f, 200.0f);
+    Vec2 pos = half_screen;
+    pos = vec2_sub(pos, vec2_divs(size, 2.0f));
+    renderer_draw_aabb(rend, (AABB) {
+            .position = pos,
+            .size = size,
+        }, vec2s(-1.0f), TEXTURE_NULL, color_rgb_hex(0x212121));
+
+    pos = vec2_adds(pos, 10.0f);
+    renderer_draw_string(rend, str, font, 32, pos, COLOR_WHITE);
+    pos.y += str_size.y;
+    pos.y += 10.0f;
+
+    if (button(rend, game_state->window, (AABB) {pos, vec2(100, 50.0f)}, str_lit("Play"), font, 32.0f)) {
+        game_state->stage = STAGE_IN_GAME;
+    }
+    pos.y += 50.0f;
+    pos.y += 10.0f;
+
+    if (button(rend, game_state->window, (AABB) {pos, vec2(100, 50.0f)}, str_lit("Quit"), font, 32.0f)) {
+        game_state->stage = STAGE_QUIT;
+    }
+    pos.y += 50.0f;
+    pos.y += 10.0f;
+
+    renderer_end(rend);
+    renderer_submit(rend);
+}
+
+void game(GameState *game_state, Font *font) {
+    if (!game_state->paused) {
+        game_state->debug_draw_i = 0;
+        {
+            grid_clear(&game_state->grid);
+            Query query = ecs_query(game_state->ecs, (QueryDesc) {
+                    .fields = {
+                    ecs_id(game_state->ecs, Transform),
+                    QUERY_FIELDS_END,
+                    },
+                });
+            for (u32 i = 0; i < query.count; i++) {
+                QueryIter iter = ecs_query_get_iter(query, i);
+                for (u32 j = 0; j < iter.count; j++) {
+                    Entity ent = ecs_query_iter_get_entity(iter, j);
+                    grid_insert(&game_state->grid, game_state->ecs, ent);
+                }
+            }
+            ecs_query_free(game_state->ecs, query);
+        }
+
+        ecs_run_group(game_state->ecs, game_state->group);
+        entity_to_entity_collision(game_state);
+    }
+
+    renderer_begin(game_state->renderer, game_state->cam);
+
+    for (u32 y = 0; y < WORLD_HEIGHT; y++) {
+        for (u32 x = 0; x < WORLD_WIDTH; x++) {
+            Tile tile = game_state->tiles[x+y*WORLD_WIDTH];
+            switch (tile.type) {
+                case TILE_NONE:
+                    break;
+
+                case TILE_GROUND:
+                    renderer_draw_aabb(game_state->renderer, (AABB) {
+                            .position = vec2(x, y),
+                            .size = vec2s(1.0f),
+                        }, vec2s(0.0f), TEXTURE_NULL, tile.color);
+
+                case TILE_TYPE_COUNT:
+                    break;
+            }
+        }
+    }
+
+    Query query = ecs_query(game_state->ecs, (QueryDesc) {
+            .fields = {
+                ecs_id(game_state->ecs, Transform),
+                ecs_id(game_state->ecs, Renderable),
+                QUERY_FIELDS_END,
+            },
+        });
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *t = ecs_query_iter_get_field(iter, 0);
+        Renderable *r = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            renderer_draw_aabb(game_state->renderer, (AABB) {
+                    .position = t[j].position,
+                    .size = t[j].size,
+                }, vec2s(0.0f), r[j].texture, r[j].color);
+        }
+    }
+    ecs_query_free(game_state->ecs, query);
+
+    for (u32 i = 0; i < game_state->debug_draw_i; i++) {
+        DebugDraw draw = game_state->debug_draw[i];
+        renderer_draw_aabb(game_state->renderer,
+                draw.aabb,
+                vec2s(0.0f),
+                TEXTURE_NULL,
+                draw.color);
+    }
+
+    renderer_end(game_state->renderer);
+    renderer_submit(game_state->renderer);
+
+    // UI
+    Ivec2 screen_size = window_get_size(game_state->window);
+    Camera screen_cam = {
+        .screen_size = screen_size,
+        .zoom = screen_size.y,
+        .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
+        .direction = vec2(1.0f, -1.0f),
+    };
+    renderer_begin(game_state->renderer, screen_cam);
+
+    renderer_draw_string(game_state->renderer, str_lit("Intense gaming"), font, 32.0f, vec2s(10), COLOR_WHITE);
+
+    // Health
+    query = ecs_query(game_state->ecs, (QueryDesc) {
+            .fields = {
+                ecs_id(game_state->ecs, Transform),
+                ecs_id(game_state->ecs, Health),
+                QUERY_FIELDS_END,
+            },
+        });
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *t = ecs_query_iter_get_field(iter, 0);
+        Health *h = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            Vec2 half_size = aabb_half_size(*t);
+            Vec2 over_entity = t[j].position;
+            over_entity.y += half_size.y;
+
+            Vec2 screen_pos = world_to_screen_space(game_state->cam, over_entity);
+            screen_pos.y -= 10.0f;
+
+            Vec2 bar_size = vec2(50.0f, 5.0f);
+
+            // Border
+            f32 border_padding = 1;
+            screen_pos.y += border_padding;
+            renderer_draw_aabb(game_state->renderer, (AABB) {
+                    .position = screen_pos,
+                    .size = vec2_adds(bar_size, border_padding*2.0f),
+                }, vec2(0.0f, 1.0f), TEXTURE_NULL, COLOR_BLACK);
+            screen_pos.y -= border_padding;
+            // Max health
+            renderer_draw_aabb(game_state->renderer, (AABB) {
+                    .position = screen_pos,
+                    .size = bar_size,
+                }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0x1c0806));
+            // Current health
+            f32 percentage = (f32) h[j].curr / (f32) h[j].max;
+            bar_size.x *= percentage;
+            renderer_draw_aabb(game_state->renderer, (AABB) {
+                    .position = screen_pos,
+                    .size = bar_size,
+                }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0xff4330));
+
+            // Text
+            f32 text_size = 16.0f;
+            char health_cstr[32] = {0};
+            snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h[j].curr, h[j].max);
+            Vec2 health_text_size = font_measure_string(font, str_cstr(health_cstr), text_size);
+            screen_pos.y -= bar_size.y;
+            screen_pos.x -= health_text_size.x / 2.0f;
+            screen_pos.y -= health_text_size.y;
+            renderer_draw_string(game_state->renderer,
+                    str_cstr(health_cstr),
+                    font,
+                    text_size,
+                    screen_pos,
+                    COLOR_WHITE);
+        }
+    }
+    ecs_query_free(game_state->ecs, query);
+
+    // :hit_text
+    query = ecs_query(game_state->ecs, (QueryDesc) {
+            .fields = {
+                ecs_id(game_state->ecs, Transform),
+                ecs_id(game_state->ecs, Hit),
+                QUERY_FIELDS_END,
+            },
+        });
+    for (u32 i = 0; i < query.count; i++) {
+        QueryIter iter = ecs_query_get_iter(query, i);
+        Transform *t = ecs_query_iter_get_field(iter, 0);
+        Hit *h = ecs_query_iter_get_field(iter, 1);
+        for (u32 j = 0; j < iter.count; j++) {
+            Vec2 screen_pos = world_to_screen_space(game_state->cam, t[j].position);
+
+            // Text
+            f32 text_size = 16.0f;
+            char hit_str[32] = {0};
+            snprintf(hit_str, arrlen(hit_str), "%d", h[j].damage);
+            Vec2 health_text_size = font_measure_string(font, str_cstr(hit_str), text_size);
+            screen_pos.x -= health_text_size.x / 2.0f;
+            screen_pos.y -= health_text_size.y / 2.0f;
+            renderer_draw_string(game_state->renderer,
+                    str_cstr(hit_str),
+                    font,
+                    text_size,
+                    screen_pos,
+                    h->color);
+        }
+    }
+    ecs_query_free(game_state->ecs, query);
+
+    // Pause menu
+    if (game_state->paused) {
+        Vec2 half_screen = vec2(screen_size.x/2.0f, screen_size.y/2.0f);
+
+        f32 padding = 2.0f;
+        Vec2 panel_size = vec2(200, 200);
+        // Border
+        renderer_draw_aabb(game_state->renderer, (AABB) {
+                .position = half_screen,
+                .size = vec2_adds(panel_size, padding),
+            }, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+        // Main rect
+        renderer_draw_aabb(game_state->renderer, (AABB) {
+                .position = half_screen,
+                .size = panel_size,
+            }, vec2s(0.0f), TEXTURE_NULL, color_rgb_hex(0x212121));
+
+        Vec2 str_size = font_measure_string(font, str_lit("Paused"), 32.0f);
+        Vec2 pos = half_screen;
+        pos.x -= str_size.x / 2.0f;
+        pos.y -= panel_size.y / 2.0f;
+        pos.y += str_size.y / 2.0f;
+        renderer_draw_string(game_state->renderer, str_lit("Paused"), font, 32.0f, pos, COLOR_WHITE);
+
+        AABB button_aabb = {
+            .position = half_screen,
+            .size = vec2(100.0f, 50.0f),
+        };
+        renderer_draw_aabb(game_state->renderer, button_aabb, vec2s(0.0f), TEXTURE_NULL, COLOR_WHITE);
+        str_size = font_measure_string(font, str_lit("Quit"), 32.0f);
+        pos = half_screen;
+        pos = vec2_sub(pos, vec2_divs(vec2(vec2_arg(str_size)), 2.0f));
+        renderer_draw_string(game_state->renderer, str_lit("Quit"), font, 32.0f, pos, COLOR_BLACK);
+
+        if (mouse_button_press(game_state->window, MOUSE_BUTTON_LEFT) && aabb_overlap_point(button_aabb, mouse_position(game_state->window))) {
+            game_state->stage = STAGE_MAIN_MENU;
+            game_state->paused = false;
+        }
+    }
+
+    renderer_end(game_state->renderer);
+    renderer_submit(game_state->renderer);
+
+    if (key_press(game_state->window, KEY_ESCAPE)) {
+        game_state->paused = !game_state->paused;
+    }
+
 }
 
 i32 main(void) {
@@ -1252,13 +1558,13 @@ i32 main(void) {
             .curr = 100,
         });
 
-    setup_boss(game_state.ecs);
+    // setup_boss(game_state.ecs);
 
     u32 fps = 0;
     f32 fps_timer = 0.0f;
 
     f32 last = glfwGetTime();
-    while (window_is_open(game_state.window)) {
+    while (game_state.stage != STAGE_QUIT && window_is_open(game_state.window)) {
         f32 curr = glfwGetTime();
         game_state.dt = curr - last;
         last = curr;
@@ -1273,192 +1579,23 @@ i32 main(void) {
 
         game_state.cam.screen_size = window_get_size(game_state.window);
 
-        // Game logic
-        game_state.debug_draw_i = 0;
-        {
-            grid_clear(&game_state.grid);
-            Query query = ecs_query(game_state.ecs, (QueryDesc) {
-                    .fields = {
-                    ecs_id(game_state.ecs, Transform),
-                    QUERY_FIELDS_END,
-                    },
-                });
-            for (u32 i = 0; i < query.count; i++) {
-                QueryIter iter = ecs_query_get_iter(query, i);
-                for (u32 j = 0; j < iter.count; j++) {
-                    Entity ent = ecs_query_iter_get_entity(iter, j);
-                    grid_insert(&game_state.grid, game_state.ecs, ent);
-                }
-            }
-            ecs_query_free(game_state.ecs, query);
-        }
-
-        ecs_run_group(game_state.ecs, game_state.group);
-        entity_to_entity_collision(&game_state);
-
-        // Rendering
         glClearColor(color_arg(COLOR_BLACK));
         glClear(GL_COLOR_BUFFER_BIT);
-        renderer_begin(game_state.renderer, game_state.cam);
 
-        for (u32 y = 0; y < WORLD_HEIGHT; y++) {
-            for (u32 x = 0; x < WORLD_WIDTH; x++) {
-                Tile tile = game_state.tiles[x+y*WORLD_WIDTH];
-                switch (tile.type) {
-                    case TILE_NONE:
-                        break;
-
-                    case TILE_GROUND:
-                        renderer_draw_aabb(game_state.renderer, (AABB) {
-                                .position = vec2(x, y),
-                                .size = vec2s(1.0f),
-                            }, vec2s(0.0f), TEXTURE_NULL, tile.color);
-
-                    case TILE_TYPE_COUNT:
-                        break;
-                }
-            }
+        switch (game_state.stage) {
+            case STAGE_MAIN_MENU:
+                main_menu(&game_state, font);
+                break;
+            case STAGE_IN_GAME:
+                game(&game_state, font);
+                break;
+            case STAGE_LOST:
+                break;
+            case STAGE_WON:
+                break;
+            case STAGE_QUIT:
+                break;
         }
-
-        Query query = ecs_query(game_state.ecs, (QueryDesc) {
-                .fields = {
-                    ecs_id(game_state.ecs, Transform),
-                    ecs_id(game_state.ecs, Renderable),
-                    QUERY_FIELDS_END,
-                },
-            });
-        for (u32 i = 0; i < query.count; i++) {
-            QueryIter iter = ecs_query_get_iter(query, i);
-            Transform *t = ecs_query_iter_get_field(iter, 0);
-            Renderable *r = ecs_query_iter_get_field(iter, 1);
-            for (u32 j = 0; j < iter.count; j++) {
-                renderer_draw_aabb(game_state.renderer, (AABB) {
-                        .position = t[j].position,
-                        .size = t[j].size,
-                    }, vec2s(0.0f), r[j].texture, r[j].color);
-            }
-        }
-        ecs_query_free(game_state.ecs, query);
-
-        for (u32 i = 0; i < game_state.debug_draw_i; i++) {
-            DebugDraw draw = game_state.debug_draw[i];
-            renderer_draw_aabb(game_state.renderer,
-                    draw.aabb,
-                    vec2s(0.0f),
-                    TEXTURE_NULL,
-                    draw.color);
-        }
-
-        renderer_end(game_state.renderer);
-        renderer_submit(game_state.renderer);
-
-        // UI
-        Ivec2 screen_size = window_get_size(game_state.window);
-        Camera screen_cam = {
-            .screen_size = screen_size,
-            .zoom = screen_size.y,
-            .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
-            .direction = vec2(1.0f, -1.0f),
-        };
-        renderer_begin(game_state.renderer, screen_cam);
-
-        renderer_draw_string(game_state.renderer, str_lit("Intense gaming"), font, 32.0f, ivec2s(10), COLOR_WHITE);
-
-        // Health
-        query = ecs_query(game_state.ecs, (QueryDesc) {
-                .fields = {
-                    ecs_id(game_state.ecs, Transform),
-                    ecs_id(game_state.ecs, Health),
-                    QUERY_FIELDS_END,
-                },
-            });
-        for (u32 i = 0; i < query.count; i++) {
-            QueryIter iter = ecs_query_get_iter(query, i);
-            Transform *t = ecs_query_iter_get_field(iter, 0);
-            Health *h = ecs_query_iter_get_field(iter, 1);
-            for (u32 j = 0; j < iter.count; j++) {
-                Vec2 half_size = aabb_half_size(*t);
-                Vec2 over_entity = t[j].position;
-                over_entity.y += half_size.y;
-
-                Vec2 screen_pos = world_to_screen_space(game_state.cam, over_entity);
-                screen_pos.y -= 10.0f;
-
-                Vec2 bar_size = vec2(50.0f, 5.0f);
-
-                // Border
-                f32 border_padding = 1;
-                screen_pos.y += border_padding;
-                renderer_draw_aabb(game_state.renderer, (AABB) {
-                        .position = screen_pos,
-                        .size = vec2_adds(bar_size, border_padding*2.0f),
-                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, COLOR_BLACK);
-                screen_pos.y -= border_padding;
-                // Max health
-                renderer_draw_aabb(game_state.renderer, (AABB) {
-                        .position = screen_pos,
-                        .size = bar_size,
-                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0x1c0806));
-                // Current health
-                f32 percentage = (f32) h[j].curr / (f32) h[j].max;
-                bar_size.x *= percentage;
-                renderer_draw_aabb(game_state.renderer, (AABB) {
-                        .position = screen_pos,
-                        .size = bar_size,
-                    }, vec2(0.0f, 1.0f), TEXTURE_NULL, color_rgb_hex(0xff4330));
-
-                // Text
-                f32 text_size = 16.0f;
-                char health_cstr[32] = {0};
-                snprintf(health_cstr, arrlen(health_cstr), "%d/%d", h[j].curr, h[j].max);
-                Ivec2 health_text_size = font_measure_string(font, str_cstr(health_cstr), text_size);
-                screen_pos.y -= bar_size.y;
-                screen_pos.x -= health_text_size.x / 2.0f;
-                screen_pos.y -= health_text_size.y;
-                renderer_draw_string(game_state.renderer,
-                        str_cstr(health_cstr),
-                        font,
-                        text_size,
-                        ivec2(vec2_arg(screen_pos)),
-                        COLOR_WHITE);
-            }
-        }
-        ecs_query_free(game_state.ecs, query);
-
-        // :hit_text
-        query = ecs_query(game_state.ecs, (QueryDesc) {
-                .fields = {
-                    ecs_id(game_state.ecs, Transform),
-                    ecs_id(game_state.ecs, Hit),
-                    QUERY_FIELDS_END,
-                },
-            });
-        for (u32 i = 0; i < query.count; i++) {
-            QueryIter iter = ecs_query_get_iter(query, i);
-            Transform *t = ecs_query_iter_get_field(iter, 0);
-            Hit *h = ecs_query_iter_get_field(iter, 1);
-            for (u32 j = 0; j < iter.count; j++) {
-                Vec2 screen_pos = world_to_screen_space(game_state.cam, t[j].position);
-
-                // Text
-                f32 text_size = 16.0f;
-                char hit_str[32] = {0};
-                snprintf(hit_str, arrlen(hit_str), "%d", h[j].damage);
-                Ivec2 health_text_size = font_measure_string(font, str_cstr(hit_str), text_size);
-                screen_pos.x -= health_text_size.x / 2.0f;
-                screen_pos.y -= health_text_size.y / 2.0f;
-                renderer_draw_string(game_state.renderer,
-                        str_cstr(hit_str),
-                        font,
-                        text_size,
-                        ivec2(vec2_arg(screen_pos)),
-                        h->color);
-            }
-        }
-        ecs_query_free(game_state.ecs, query);
-
-        renderer_end(game_state.renderer);
-        renderer_submit(game_state.renderer);
 
         if (key_press(game_state.window, KEY_F11)) {
             window_toggle_fullscreen(game_state.window);

@@ -302,7 +302,7 @@ void renderer_draw_aabb_atlas(Renderer *renderer, AABB aabb, Vec2 origin, Textur
             color);
 }
 
-void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Ivec2 position, Color color) {
+void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Vec2 position, Color color) {
     FontMetrics metrics = font_get_metrics(font, size);
     for (u64 i = 0; i < string.len; i++) {
         Glyph glyph = font_get_glyph(font, string.data[i], size);
