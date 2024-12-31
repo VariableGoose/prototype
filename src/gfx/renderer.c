@@ -302,8 +302,9 @@ void renderer_draw_aabb_atlas(Renderer *renderer, AABB aabb, Vec2 origin, Textur
             color);
 }
 
-void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Vec2 position, Color color) {
+Vec2 renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Vec2 position, Color color) {
     FontMetrics metrics = font_get_metrics(font, size);
+    Vec2 str_size = vec2(0.0f, metrics.ascent-metrics.descent);
     for (u64 i = 0; i < string.len; i++) {
         Glyph glyph = font_get_glyph(font, string.data[i], size);
         renderer_draw_aabb_atlas(renderer, (AABB) {
@@ -320,5 +321,7 @@ void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, 
                 .v1 = glyph.uv[1].y,
             }, color);
         position.x += glyph.advance;
+        str_size.x += glyph.advance;
     }
+    return str_size;
 }

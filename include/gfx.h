@@ -156,7 +156,7 @@ extern void renderer_draw_aabb_atlas(Renderer *renderer, AABB aabb, Vec2 origin,
 //     .position = vec2(vec2_arg(ivec2_divs(screen_size, 2))),
 //     .direction = vec2(1.0f, -1.0f),
 // }
-extern void renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Vec2 position, Color color);
+extern Vec2 renderer_draw_string(Renderer *renderer, Str string, Font *font, u32 size, Vec2 position, Color color);
 
 // -- Font ---------------------------------------------------------------------
 // Freetype2 doesn't seem to parse GPOS kerning. Since almost all modern

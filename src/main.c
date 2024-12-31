@@ -87,6 +87,7 @@ typedef struct Health Health;
 struct Health {
     i32 max;
     i32 curr;
+    void (*on_death)(ECS *ecs, Entity entity, void *user_ptr);
 };
 
 typedef struct Hit Hit;
@@ -264,6 +265,7 @@ struct GameState {
 
     Stage stage;
     b8 paused;
+    b8 setup;
 };
 
 Tile get_tile(GameState *state, Vec2 pos) {
@@ -1036,6 +1038,9 @@ void health_system(ECS *ecs, QueryIter iter, void *user_ptr) {
         h[i].curr = clamp(h[i].curr, 0, h[i].max);
         if (h[i].curr <= 0) {
             Entity ent = ecs_query_iter_get_entity(iter, i);
+            if (h[i].on_death != NULL) {
+                h[i].on_death(ecs, ent, user_ptr);
+            }
             ecs_entity_kill(ecs, ent);
         }
     }
@@ -1068,7 +1073,6 @@ GameState game_state_new(void) {
     Window *window = window_new(1280, 720, "Prototype", false, ALLOCATOR_LIBC);
     gfx_init(glfwGetProcAddress);
     return (GameState) {
-        .ecs = ecs_new(),
         .window = window,
         .renderer = renderer_new(4096, ALLOCATOR_LIBC),
         .gravity = -9.82f,
@@ -1082,7 +1086,9 @@ GameState game_state_new(void) {
 }
 
 void game_state_free(GameState *state) {
-    ecs_free(state->ecs);
+    if (state->ecs != NULL) {
+        ecs_free(state->ecs);
+    }
     grid_free(&state->grid);
     // Always call 'renderer_free()' before 'window_free()' becaues the former
     // uses OpenGL functions that are no longer available after 'window_free()'
@@ -1286,6 +1292,60 @@ void main_menu(GameState *game_state, Font *font) {
     renderer_submit(rend);
 }
 
+void game_quit(GameState *state) {
+    state->stage = STAGE_MAIN_MENU;
+    state->paused = false;
+    state->setup = false;
+}
+
+void player_death(ECS *ecs, Entity ent, void *user_ptr) {
+    (void) ecs;
+    (void) ent;
+    GameState *state = user_ptr;
+    game_quit(state);
+}
+
+void setup_game(GameState *game_state) {
+    if (game_state->ecs != NULL) {
+        ecs_free(game_state->ecs);
+    }
+    game_state->ecs = ecs_new();
+    setup_ecs(game_state);
+
+    ECS *ecs = game_state->ecs;
+    Entity player = ecs_entity(ecs);
+    entity_add_component(ecs, player, Transform, {
+            .position = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
+            .size = vec2(1.0f, 1.0f),
+        });
+    entity_add_component(ecs, player, Player, {
+            .acceleration = 5.0f,
+            .deceleration = 40.0f,
+            .max_horizontal_speed = 30.0f,
+
+            .max_fall_speed = -90.0f,
+            .max_flight_time = 10.0f,
+            .max_vertical_speed = 30.0f,
+            .flight_acc = 5.0f,
+
+            .shoot_delay = 1.0f / 5.0f,
+        });
+    entity_add_component(ecs, player, Renderable, {
+            .color = color_hsv(0.0f, 0.75f, 1.0f),
+            .texture = TEXTURE_NULL,
+        });
+    entity_add_component(ecs, player, PhysicsBody, {
+            .gravity_multiplier = 10.0f,
+            .is_static = false,
+            .collider = true,
+        });
+    entity_add_component(ecs, player, Health, {
+            .max = 100,
+            .curr = 100,
+            .on_death = player_death,
+        });
+}
+
 void game(GameState *game_state, Font *font) {
     if (!game_state->paused) {
         game_state->debug_draw_i = 0;
@@ -1374,7 +1434,12 @@ void game(GameState *game_state, Font *font) {
     };
     renderer_begin(game_state->renderer, screen_cam);
 
-    renderer_draw_string(game_state->renderer, str_lit("Intense gaming"), font, 32.0f, vec2s(10), COLOR_WHITE);
+    {
+        Vec2 pos = vec2s(10.0f);
+        Vec2 size = renderer_draw_string(game_state->renderer, str_lit("Intense gaming"), font, 32.0f, pos, COLOR_WHITE);
+        pos.y += size.y;
+        renderer_draw_string(game_state->renderer, str_lit("Press P to spawn boss."), font, 32.0f, pos, COLOR_WHITE);
+    }
 
     // Health
     query = ecs_query(game_state->ecs, (QueryDesc) {
@@ -1504,8 +1569,7 @@ void game(GameState *game_state, Font *font) {
         renderer_draw_string(game_state->renderer, str_lit("Quit"), font, 32.0f, pos, COLOR_BLACK);
 
         if (mouse_button_press(game_state->window, MOUSE_BUTTON_LEFT) && aabb_overlap_point(button_aabb, mouse_position(game_state->window))) {
-            game_state->stage = STAGE_MAIN_MENU;
-            game_state->paused = false;
+            game_quit(game_state);
         }
     }
 
@@ -1516,49 +1580,18 @@ void game(GameState *game_state, Font *font) {
         game_state->paused = !game_state->paused;
     }
 
+    if (key_press(game_state->window, KEY_P)) {
+        setup_boss(game_state->ecs);
+    }
 }
 
 i32 main(void) {
     GameState game_state = game_state_new();
-    setup_ecs(&game_state);
     setup_world(&game_state);
     window_set_vsync(game_state.window, false);
     window_set_fullscreen(game_state.window, true);
 
     Font *font = font_init(str_lit("assets/fonts/Tiny5/Tiny5-Regular.ttf"), game_state.renderer, false, ALLOCATOR_LIBC);
-
-    Entity player = ecs_entity(game_state.ecs);
-    entity_add_component(game_state.ecs, player, Transform, {
-            .position = vec2(WORLD_WIDTH/2.0f, WORLD_HEIGHT/8.0f),
-            .size = vec2(1.0f, 1.0f),
-        });
-    entity_add_component(game_state.ecs, player, Player, {
-            .acceleration = 5.0f,
-            .deceleration = 40.0f,
-            .max_horizontal_speed = 30.0f,
-
-            .max_fall_speed = -90.0f,
-            .max_flight_time = 10.0f,
-            .max_vertical_speed = 30.0f,
-            .flight_acc = 5.0f,
-
-            .shoot_delay = 1.0f / 5.0f,
-        });
-    entity_add_component(game_state.ecs, player, Renderable, {
-            .color = color_hsv(0.0f, 0.75f, 1.0f),
-            .texture = TEXTURE_NULL,
-        });
-    entity_add_component(game_state.ecs, player, PhysicsBody, {
-            .gravity_multiplier = 10.0f,
-            .is_static = false,
-            .collider = true,
-        });
-    entity_add_component(game_state.ecs, player, Health, {
-            .max = 100,
-            .curr = 100,
-        });
-
-    // setup_boss(game_state.ecs);
 
     u32 fps = 0;
     f32 fps_timer = 0.0f;
@@ -1587,11 +1620,11 @@ i32 main(void) {
                 main_menu(&game_state, font);
                 break;
             case STAGE_IN_GAME:
+                if (!game_state.setup) {
+                    setup_game(&game_state);
+                    game_state.setup = true;
+                }
                 game(&game_state, font);
-                break;
-            case STAGE_LOST:
-                break;
-            case STAGE_WON:
                 break;
             case STAGE_QUIT:
                 break;
